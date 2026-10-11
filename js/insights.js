@@ -228,3 +228,36 @@ export function trends(events, standings) {
   const defense = [...standings].sort((x, y) => x.ga - y.ga)[0];
   return { hot, cold, attack, defense };
 }
+
+/** O que muda na tabela entre duas versões (atual x simulada). */
+export function impactLines({ before, after, zones, favorite }) {
+  const items = [];
+  const add = (prio, tag, text, tone) => items.push({ prio, tag, text, tone });
+  const lead = after.rows[0];
+  if (before.rows[0].id !== lead.id) add(10, 'Líder', `${lead.name} assume a liderança`, 'good');
+  else {
+    const gap = lead.pts - after.rows[1].pts;
+    add(3, 'Líder', `${lead.name} segue líder, ${gap} ${gap === 1 ? 'ponto' : 'pontos'} à frente ${doo(after.rows[1].name)}`, 'good');
+  }
+  const zone = (limit, inside, label, tone) => {
+    if (!limit) return;
+    for (const r of after.rows) {
+      const was = before.byId.get(r.id);
+      if (!was || inside(was.pos) === inside(r.pos)) continue;
+      add(8, label, `${r.name} ${inside(r.pos) ? 'entra no' : 'sai do'} ${label}`, tone);
+    }
+  };
+  zone(zones?.zStart, (p) => p >= zones.zStart, zones?.zLabel, 'bad');
+  zone(zones?.g, (p) => p <= zones.g, zones?.gLabel, 'good');
+  const moves = after.rows.map((r) => ({ r, d: (before.byId.get(r.id)?.pos ?? r.pos) - r.pos })).filter((m) => m.d);
+  const up = moves.filter((m) => m.d >= 2).sort((x, y) => y.d - x.d)[0];
+  const down = moves.filter((m) => m.d <= -2).sort((x, y) => x.d - y.d)[0];
+  if (up) add(5, 'Sobe', `${up.r.name} sobe ${up.d} posições, para ${up.r.pos}º`, 'good');
+  if (down) add(5, 'Cai', `${down.r.name} cai ${-down.d} posições, para ${down.r.pos}º`, 'bad');
+  const fav = favorite && after.byId.get(favorite);
+  const favBefore = favorite && before.byId.get(favorite);
+  if (fav && favBefore && (fav.pos !== favBefore.pos || fav.pts !== favBefore.pts)) {
+    add(9, 'Meu time', `${fav.name}: de ${favBefore.pos}º para ${fav.pos}º, com ${fav.pts} pontos`, 'plain');
+  }
+  return items.sort((x, y) => y.prio - x.prio).slice(0, 6);
+}

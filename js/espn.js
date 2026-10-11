@@ -16,11 +16,30 @@ export const fetchScoreboard = (range, limit = 300) => getJSON(range ? `${SCOREB
 export const fetchStandings = () => getJSON(STANDINGS);
 export const fetchSummary = (id) => getJSON(`${SUMMARY}?event=${encodeURIComponent(id)}`);
 
-// Logos da ESPN vêm em 500px; o "combiner" entrega uma versão pequena.
-export function crestUrl(url, size = 64) {
-  const m = /^https?:\/\/a\.espncdn\.com(\/i\/teamlogos\/[^?]+)$/.exec(url || '');
-  return m ? `https://a.espncdn.com/combiner/i?img=${m[1]}&w=${size}&h=${size}` : url;
+const pad = (n) => String(n).padStart(2, '0');
+
+/**
+ * Todos os jogos do ano, buscados mês a mês em paralelo.
+ * Devolve {events, months, failed}: failed lista os meses que não vieram.
+ */
+export async function fetchSeason(year) {
+  const months = Array.from({ length: 12 }, (_, i) => i + 1);
+  const results = await Promise.allSettled(months.map((m) => {
+    const last = new Date(year, m, 0).getDate();
+    return fetchScoreboard(`${year}${pad(m)}01-${year}${pad(m)}${pad(last)}`, 200);
+  }));
+  const byId = new Map();
+  const failed = [];
+  let season = null;
+  results.forEach((r, i) => {
+    if (r.status !== 'fulfilled') { failed.push(months[i]); return; }
+    for (const e of r.value?.events || []) byId.set(String(e.id), e);
+    season ||= r.value?.leagues?.[0]?.season?.year || null;
+  });
+  return { events: [...byId.values()], failed, season };
 }
+
+const logoOf = (team) => team?.logo || team?.logos?.find((l) => (l.rel || []).includes('default'))?.href || team?.logos?.[0]?.href || '';
 
 const hexColor = (c) => (/^#?[0-9a-f]{6}$/i.test(c || '') ? `#${c.replace('#', '')}` : null);
 
@@ -58,7 +77,7 @@ export function parseEvent(e) {
     id: String(x?.team?.id ?? x?.id ?? ''),
     name: x?.team?.shortDisplayName || x?.team?.displayName || x?.team?.name || '?',
     abbr: x?.team?.abbreviation || '',
-    logo: x?.team?.logo || x?.team?.logos?.[0]?.href || '',
+    logo: logoOf(x?.team),
     color: hexColor(x?.team?.color),
     color2: hexColor(x?.team?.alternateColor),
     score: x?.score == null || x.score === '' ? null : Number(x.score),
@@ -109,12 +128,16 @@ export function parseEvent(e) {
 
 export const seasonYear = (json) => json?.leagues?.[0]?.season?.year || json?.events?.[0]?.season?.year || null;
 
+const ABBR = { gamesPlayed: 'GP', wins: 'W', ties: 'D', losses: 'L', points: 'P', pointsFor: 'F', pointsAgainst: 'A', pointDifferential: 'GD', rank: 'R' };
+
 export function parseStandings(json) {
-  const group = json?.children?.[0]?.standings || json?.standings;
-  const rows = (group?.entries || []).map((en) => {
+  const groups = json?.children?.length ? json.children.map((c) => c.standings) : [json?.standings];
+  const entries = groups.flatMap((g) => g?.entries || []);
+  const rows = entries.map((en) => {
     const stat = (name) => {
-      const s = (en.stats || []).find((x) => x.name === name);
-      const v = s == null ? null : Number(s.value);
+      const list = en.stats || [];
+      const s = list.find((x) => x.name === name) || list.find((x) => x.type === name.toLowerCase()) || list.find((x) => x.abbreviation === ABBR[name]);
+      const v = s == null ? null : Number(s.value ?? s.displayValue);
       return Number.isFinite(v) ? v : null;
     };
     const gf = stat('pointsFor') ?? 0;
@@ -122,7 +145,7 @@ export function parseStandings(json) {
     return {
       id: String(en.team?.id ?? ''),
       name: en.team?.shortDisplayName || en.team?.displayName || '?',
-      logo: en.team?.logos?.[0]?.href || '',
+      logo: logoOf(en.team),
       rank: stat('rank'),
       pts: stat('points') ?? 0,
       gp: stat('gamesPlayed') ?? 0,

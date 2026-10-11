@@ -1,16 +1,17 @@
 // Montagem do HTML de cada parte da tela. Funções puras: recebem dados, devolvem texto.
-import { crestUrl } from './espn.js';
 import { bucketLabels, storyTags } from './insights.js';
 import { distances, formPoints } from './table.js';
-import { canPick, grade } from './bolao.js';
-import { decimal, dm, esc, fmtTime, kickoff, o, plural, shortDay, weekdayShort } from './util.js';
+import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, shortDay, weekdayShort } from './util.js';
 
 const ord = (n) => (n ? `${n}º` : '');
 
+const initials = (name) => (name || '?').replace(/[^\p{L}\p{N} ]/gu, '').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 3).toUpperCase() || '?';
+
+// Escudo do time. Se a imagem falhar, o app troca pelas iniciais (ver app.js).
 export function crest(url, name, size = 26, cls = 'crest') {
-  const style = `width:${size}px;height:${size}px`;
-  if (!url) return `<span class="crest-fallback" style="${style}">${esc((name || '?').slice(0, 3).toUpperCase())}</span>`;
-  return `<img class="${cls}" style="${style}" src="${esc(crestUrl(url, size > 40 ? 128 : 64))}" data-fallback="${esc(url)}" alt="" loading="lazy" decoding="async">`;
+  const style = `width:${size}px;height:${size}px;font-size:${Math.max(8, Math.round(size * 0.34))}px`;
+  if (!url) return `<span class="crest-fallback" style="${style}" aria-hidden="true">${esc(initials(name))}</span>`;
+  return `<img class="${cls}" style="${style}" src="${esc(url)}" data-name="${esc(initials(name))}" alt="" loading="lazy" decoding="async">`;
 }
 
 const star = '<svg class="star" viewBox="0 0 24 24" width="14" height="14" aria-label="Meu time"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" fill="currentColor"/></svg>';
@@ -39,17 +40,7 @@ function scorers(goals) {
   return [...byPlayer.values()].map((p) => `${p.who}${p.og ? ' (contra)' : ''} ${p.mins.join(', ')}`.trim()).join(' · ');
 }
 
-export function pickChip(ev, pick) {
-  if (!pick) return canPick(ev) ? '<span class="pick-cta">Palpitar</span>' : '';
-  const guess = `${pick.h} x ${pick.a}`;
-  if (ev.status.kind === 'pre') return `<span class="pick">Palpite ${guess}</span>`;
-  const g = grade(pick, ev.home.score, ev.away.score);
-  if (!g) return `<span class="pick">Palpite ${guess}</span>`;
-  const live = ev.status.kind === 'live';
-  return `<span class="pick pick-${g.kind}">Palpite ${guess} · ${live ? 'valendo ' : ''}+${g.pts}</span>`;
-}
-
-/** Cartão de um jogo. ctx: {rank(id), delta(id), favorite, flash, pick, story} */
+/** Cartão de um jogo. ctx: {rank(id), delta(id), favorite, flash, story, note} */
 export function matchCard(ev, ctx) {
   const s = ev.status;
   let status;
@@ -88,7 +79,7 @@ export function matchCard(ev, ctx) {
       aria-label="${esc(`${ev.home.name} ${ev.home.score ?? ''} x ${ev.away.score ?? ''} ${ev.away.name}, ${label}. Toque para ver detalhes.`)}">
       <div class="status">${status}</div>
       <div class="teams">${row(ev.home, 'home')}${row(ev.away, 'away')}</div>
-      <div class="match-foot">${left}${pickChip(ev, ctx.pick)}</div>
+      <div class="match-foot">${left}${ctx.note ? `<span class="foot-note">${esc(ctx.note)}</span>` : ev.moved ? `<span class="foot-note">${ev.status.kind === 'post' ? 'Jogo remarcado' : 'Remarcado'}</span>` : ''}</div>
     </article>`;
 }
 
@@ -180,7 +171,7 @@ export function standingsTable({ table, zones, formById, favorite }) {
 }
 
 /** Aba Números. */
-export function statsView({ roundLabel, st, trends, bolao, bolaoRound, selectedBar }) {
+export function statsView({ roundLabel, st, trends, selectedBar }) {
   const parts = [];
   if (st.games) {
     const tiles = [
@@ -253,17 +244,6 @@ export function statsView({ roundLabel, st, trends, bolao, bolaoRound, selectedB
       </section>`);
   }
 
-  parts.push(`
-    <section class="block">
-      <h2 class="section-title">Seu bolão</h2>
-      <div class="tiles">
-        <div class="tile"><span class="tile-label">Pontos</span><span class="tile-value">${bolao.pts}</span><span class="tile-sub">em ${plural(bolao.graded, 'jogo encerrado', 'jogos encerrados')}</span></div>
-        <div class="tile"><span class="tile-label">Nesta rodada</span><span class="tile-value">${bolaoRound.pts}</span><span class="tile-sub">${bolaoRound.open ? `${plural(bolaoRound.open, 'palpite aberto', 'palpites abertos')}` : 'sem palpites abertos'}</span></div>
-        <div class="tile"><span class="tile-label">Na mosca</span><span class="tile-value">${bolao.exact}</span><span class="tile-sub">placares exatos</span></div>
-        <div class="tile"><span class="tile-label">Acertos</span><span class="tile-value">${bolao.right}</span><span class="tile-sub">vencedor ou empate</span></div>
-      </div>
-      <p class="chart-note">Toque num jogo que ainda não começou para palpitar. Placar exato vale 3 pontos e acertar o vencedor ou o empate vale 1. Os palpites ficam salvos só neste celular.</p>
-    </section>`);
   return parts.join('');
 }
 
@@ -328,34 +308,13 @@ function timeline(ev) {
   return `<ol class="timeline">${items.join('')}</ol>`;
 }
 
-function stepper(ev, side, value, enabled) {
+function stepper(ev, side, value) {
   const label = side === 'h' ? ev.home.name : ev.away.name;
-  return `<span class="stepper" role="group" aria-label="${esc(`Gols do ${label}`)}">
-    <button type="button" data-action="pick" data-id="${esc(ev.id)}" data-side="${side}" data-delta="-1" aria-label="Menos um" ${enabled ? '' : 'disabled'}>−</button>
+  return `<span class="stepper" role="group" aria-label="${esc(`Gols ${label}`)}">
+    <button type="button" data-action="sim-step" data-id="${esc(ev.id)}" data-side="${side}" data-delta="-1" aria-label="${esc(`Menos um gol para ${label}`)}">−</button>
     <output>${value ?? '–'}</output>
-    <button type="button" data-action="pick" data-id="${esc(ev.id)}" data-side="${side}" data-delta="1" aria-label="Mais um" ${enabled ? '' : 'disabled'}>+</button>
+    <button type="button" data-action="sim-step" data-id="${esc(ev.id)}" data-side="${side}" data-delta="1" aria-label="${esc(`Mais um gol para ${label}`)}">+</button>
   </span>`;
-}
-
-function bolaoBlock(ev, pick) {
-  if (canPick(ev)) {
-    return `<section class="sheet-block">
-      <h3 class="sub-title">Seu palpite</h3>
-      <div class="pick-grid">
-        <span class="pick-team">${esc(ev.home.name)}</span><span></span><span class="pick-team">${esc(ev.away.name)}</span>
-        ${stepper(ev, 'h', pick?.h, true)}<span class="pick-x">x</span>${stepper(ev, 'a', pick?.a, true)}
-      </div>
-      <p class="chart-note">${pick ? `Palpite salvo: ${pick.h} x ${pick.a}. ` : 'Toque em + ou − para palpitar. '}Vale até o início do jogo.${pick ? ' <button type="button" class="link" data-action="unpick" data-id="' + esc(ev.id) + '">Apagar palpite</button>' : ''}</p>
-    </section>`;
-  }
-  if (!pick) return '';
-  const g = grade(pick, ev.home.score, ev.away.score);
-  const live = ev.status.kind === 'live';
-  const verdict = !g ? '' : live ? `Se terminar assim: ${g.label.toLowerCase()}, +${g.pts}` : `${g.label}! +${g.pts} ${g.pts === 1 ? 'ponto' : 'pontos'}`;
-  return `<section class="sheet-block">
-    <h3 class="sub-title">Seu palpite</h3>
-    <p class="pick-result pick-${g?.kind || 'open'}"><b>${pick.h} x ${pick.a}</b> ${esc(verdict)}</p>
-  </section>`;
 }
 
 function scenarioBlock(ev, sc) {
@@ -374,7 +333,7 @@ function scenarioBlock(ev, sc) {
   </section>`;
 }
 
-/** Detalhe de um jogo. ctx: {table, scen, stats, pick, formById, favorite, story, now} */
+/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, now} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
   const pre = s.kind === 'pre' || s.kind === 'off';
@@ -399,12 +358,12 @@ export function matchSheet(ev, ctx) {
       </div>
       ${head(ev.away)}
     </div>
-    <p class="sh-meta">${esc([`${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}</p>
+    <p class="sh-meta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="tags center">${tags.map((t) => `<b class="tag tone-gol">${esc(t)}</b>`).join('')}</p>` : ''}
-    ${bolaoBlock(ev, ctx.pick)}
     ${ev.incidents.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev)}</section>` : ''}
     ${stats ? `<section class="sheet-block"><h3 class="sub-title">Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="chart-note center">Carregando estatísticas…</p>' : '')}
     ${scenarioBlock(ev, ctx.scen)}
+    ${s.kind !== 'post' ? `<button type="button" class="wide-btn" data-action="simulate" data-id="${esc(ev.id)}">Simular este jogo e ver a tabela</button>` : ''}
     <section class="sheet-block">
       <h3 class="sub-title">Últimos 5 jogos</h3>
       ${formRow(ev.home)}${formRow(ev.away)}
@@ -412,7 +371,7 @@ export function matchSheet(ev, ctx) {
 }
 
 /** Detalhe de um time. */
-export function teamSheet({ team, row, table, zones, form, upcoming, favorite }) {
+export function teamSheet({ team, row, table, zones, form, upcoming, favorite, odds }) {
   const isFav = team.id === favorite;
   const zone = row ? zones.byPos[row.pos] : null;
   const pct = row?.gp ? Math.round((row.pts / (row.gp * 3)) * 100) : 0;
@@ -432,6 +391,8 @@ export function teamSheet({ team, row, table, zones, form, upcoming, favorite })
     <div class="mini-tiles">
       ${[['J', row.gp], ['V', row.w], ['E', row.d], ['D', row.l], ['SG', row.gd > 0 ? `+${row.gd}` : row.gd], ['%', pct]].map(([l, v]) => `<div><span>${l}</span><b>${v}</b></div>`).join('')}
     </div>` : ''}
+    ${odds ? `<section class="sheet-block"><h3 class="sub-title">Chances até o fim <small>simulação do restante do campeonato</small></h3>
+      <div class="odds">${oddsTiles(odds, zones)}</div></section>` : ''}
     ${dist.length ? `<section class="sheet-block"><h3 class="sub-title">Distâncias${table.anyLive ? ' <small>com os placares atuais</small>' : ''}</h3>
       <dl class="dist">${dist.map((d) => `<div><dt>${esc(d.label)}</dt><dd>${esc(d.value)}</dd></div>`).join('')}</dl></section>` : ''}
     ${upcoming ? `<section class="sheet-block"><h3 class="sub-title">${upcoming.status.kind === 'live' ? 'Jogando agora' : 'Próximo jogo'}</h3>
@@ -477,3 +438,159 @@ export function shareText(round, roundLabel, season, table) {
   return lines.join('\n');
 }
 
+
+// ---------- simulador ----------
+
+export function pct(p) {
+  if (p == null) return '–';
+  if (p <= 0) return '0%';
+  if (p < 0.005) return '<1%';
+  if (p >= 1) return '100%';
+  if (p > 0.995) return '>99%';
+  return `${Math.round(p * 100)}%`;
+}
+
+function oddsTiles(o, zones) {
+  const tiles = [['Título', o.title]];
+  if (zones.g) tiles.push([zones.gLabel, o.g]);
+  if (zones.zStart) tiles.push([`Cair (${zones.zLabel})`, o.z]);
+  tiles.push(['Pontos no fim', null, Math.round(o.pts)]);
+  return tiles.map(([l, p, v]) => `<div><span>${esc(l)}</span><b>${v ?? pct(p)}</b></div>`).join('');
+}
+
+// Nome curto para os botões: a sigla da ESPN ou o próprio nome, se já for curto.
+const short = (t) => (t.name.length <= 9 ? t.name : t.abbr || t.name);
+
+function simCard(ev, sim) {
+  const s = ev.status;
+  const final = s.kind === 'post';
+  let status;
+  if (final) status = 'FIM';
+  else if (s.kind === 'live') status = `${esc(s.label)}<span class="pulse" aria-hidden="true"></span>`;
+  else if (s.kind === 'off') status = `<small>${esc(s.label)}</small>`;
+  else status = `${esc(weekdayShort(ev.date))}<small>${esc(fmtTime.format(ev.date))}</small>`;
+  const value = (side) => (sim ? sim[side] : s.kind === 'live' ? (side === 'h' ? ev.home.score : ev.away.score) : null);
+  const row = (t, side) => `
+    <div class="sim-row">
+      ${crest(t.logo, t.name, 24)}<span class="nm">${esc(t.name)}</span>
+      ${final ? `<b class="score">${side === 'h' ? ev.home.score : ev.away.score}</b>` : stepper(ev, side, value(side))}
+    </div>`;
+  const outcome = sim ? Math.sign(sim.h - sim.a) : null;
+  const quick = final ? '' : `
+    <div class="sim-quick" role="group" aria-label="Resultado rápido">
+      <button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="1" data-a="0" aria-pressed="${outcome === 1}" aria-label="${esc(`Vitória ${doo(ev.home.name)}`)}">${esc(short(ev.home))}</button>
+      <button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="1" data-a="1" aria-pressed="${outcome === 0}">Empate</button>
+      <button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="0" data-a="1" aria-pressed="${outcome === -1}" aria-label="${esc(`Vitória ${doo(ev.away.name)}`)}">${esc(short(ev.away))}</button>
+      ${sim ? `<button type="button" class="undo" data-action="sim-reset" data-id="${esc(ev.id)}" aria-label="Desfazer simulação">Desfazer</button>` : ''}
+    </div>`;
+  return `
+    <article class="sim-card is-${s.kind}${sim ? ' is-sim' : ''}" id="sim-${esc(ev.id)}">
+      <div class="status">${status}${sim ? '<b class="sim-flag">simulado</b>' : ''}</div>
+      <div class="sim-body">${row(ev.home, 'h')}${row(ev.away, 'a')}${quick}</div>
+    </article>`;
+}
+
+function miniTable(sim, real, zones, favorite) {
+  return `<table class="mini-table">
+    <thead><tr><th>#</th><th></th><th class="club">Clube</th><th>P</th><th>J</th><th>SG</th></tr></thead>
+    <tbody>${sim.rows.map((t) => {
+      const before = real.byId.get(t.id);
+      const delta = before ? before.pos - t.pos : 0;
+      const dp = before ? t.pts - before.pts : 0;
+      const zone = zones.byPos[t.pos];
+      const cls = [delta || dp ? 'changed' : '', t.id === favorite ? 'is-fav' : ''].filter(Boolean).join(' ');
+      return `<tr data-team="${esc(t.id)}"${cls ? ` class="${cls}"` : ''}>
+        <td class="pos"${zone ? ` style="--zone:${esc(zone.color)}"` : ''}>${t.pos}</td>
+        <td class="mv">${moveChip(delta)}</td>
+        <td class="club"><span class="club-cell">${crest(t.logo, t.name, 18, 'mini')}<span class="club-name">${esc(t.name)}</span></span></td>
+        <td class="pts">${t.pts}${dp ? `<small class="${dp > 0 ? 'up-text' : 'down-text'}">${dp > 0 ? '+' : '−'}${Math.abs(dp)}</small>` : ''}</td><td>${t.gp}</td><td>${t.gd > 0 ? `+${t.gd}` : t.gd}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function oddsTable(sim, odds, base, zones, favorite) {
+  const cols = [['title', 'Título']];
+  if (zones.g) cols.push(['g', zones.gLabel]);
+  if (zones.zStart) cols.push(['z', zones.zLabel]);
+  const cell = (key, o, b) => {
+    const p = o[key];
+    const diff = b ? Math.round((p - b[key]) * 100) : 0;
+    return `<td class="odd odd-${key}" style="--f:${p.toFixed(3)}"><span>${pct(p)}</span>${diff ? `<small class="${diff > 0 ? 'up-text' : 'down-text'}">${diff > 0 ? '+' : ''}${diff}</small>` : ''}</td>`;
+  };
+  return `<div class="table-wrap"><table class="odds-table">
+    <thead><tr><th class="club">Clube</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th title="Pontos esperados no fim">Pts</th></tr></thead>
+    <tbody>${sim.rows.map((t) => {
+      const o = odds.byId.get(t.id);
+      if (!o) return '';
+      const b = base?.byId.get(t.id);
+      return `<tr data-team="${esc(t.id)}"${t.id === favorite ? ' class="is-fav"' : ''}>
+        <td class="club"><span class="club-cell"><span class="pos-n">${t.pos}</span>${crest(t.logo, t.name, 18, 'mini')}<span class="club-name">${esc(t.name)}</span></span></td>
+        ${cols.map(([k]) => cell(k, o, b)).join('')}
+        <td class="pts">${Math.round(o.pts)}</td>
+      </tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+/**
+ * Aba Simular.
+ * real: tabela atual (sem simulações); sim: tabela com as simulações; odds/oddsBase: chances com e sem simulações.
+ */
+export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished }) {
+  const count = round.events.filter((e) => sims[e.id]).length;
+  const total = Object.keys(sims).length;
+  const head = `
+    <section class="block sim-head">
+      <h2 class="section-title">Simulador · ${esc(roundLabel)}</h2>
+      <p class="chart-note">Escolha os placares dos jogos que faltam e veja a tabela e as chances mudarem na hora. Jogos encerrados ficam com o resultado real. A simulação fica salva neste celular até você limpar.</p>
+      <div class="sim-actions">
+        ${finished ? '' : '<button type="button" class="chip-btn" data-action="sim-random">Sortear placares</button>'}
+        <button type="button" class="chip-btn" data-action="sim-clear"${total ? '' : ' disabled'}>Limpar${total ? ` (${total})` : ''}</button>
+      </div>
+      ${total > count ? `<p class="chart-note">${plural(total - count, 'jogo simulado', 'jogos simulados')} em outras rodadas também ${total - count === 1 ? 'entra' : 'entram'} na conta.</p>` : ''}
+    </section>`;
+  const games = finished
+    ? `<p class="empty">Esta rodada já terminou. Use as setas no topo para ir a uma rodada que ainda vai acontecer.</p>`
+    : `<div class="sim-list">${round.events.map((e) => simCard(e, sims[e.id])).join('')}</div>`;
+  const impactHtml = sim && real ? `
+    <section class="block">
+      <h2 class="section-title">${total ? 'Com esses placares' : 'Tabela agora'}</h2>
+      ${impact.length ? `<ul class="impact">${impact.map((n) => `<li><b class="tag tone-${n.tone}">${esc(n.tag)}</b><span>${esc(n.text)}</span></li>`).join('')}</ul>` : ''}
+      <div class="table-wrap">${miniTable(sim, real, zones, favorite)}</div>
+    </section>` : '';
+  const oddsHtml = `
+    <section class="block">
+      <h2 class="section-title">Chances até o fim</h2>
+      ${odds ? oddsTable(sim || real, odds, total ? oddsBase : null, zones, favorite) : ''}
+      <p class="chart-note">${esc(oddsNote)}</p>
+    </section>`;
+  return head + games + impactHtml + oddsHtml;
+}
+
+// ---------- status dos dados ----------
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const hhmm = (t) => (t ? fmtTime.format(new Date(t)) : '');
+
+export function diagSheet(d) {
+  const row = (ok, label, text) => `<li class="diag-${ok === null ? 'wait' : ok ? 'ok' : 'bad'}"><b>${ok === null ? '…' : ok ? '✓' : '!'}</b><span><strong>${esc(label)}</strong><small>${esc(text)}</small></span></li>`;
+  const s = d.season;
+  const seasonText = !s ? 'ainda não carregou'
+    : s.count ? `${s.count} jogos às ${hhmm(s.t)}${s.failed.length ? `; meses que falharam: ${s.failed.map((m) => MONTHS[m - 1]).join(', ')}` : ', todos os meses'}`
+      : `nenhum jogo veio na busca por mês${s.fallback != null ? `; usando a rodada atual (${s.fallback} jogos)` : ''}`;
+  const st = d.standings;
+  const items = [
+    row(s ? s.count > 0 && !s.failed.length : null, 'Jogos da temporada', seasonText),
+    row(st ? st.ok : null, 'Classificação oficial da ESPN', !st ? 'ainda não carregou' : st.ok ? `${st.count} times às ${hhmm(st.t)}` : `falhou às ${hhmm(st.t)}: ${st.error}`),
+    row(d.mode ? true : d.season ? false : null, 'Tabela do app', d.mode === 'jogos' ? 'calculada a partir de todos os jogos (ao vivo e exata)' : d.mode === 'espn' ? 'classificação da ESPN corrigida com os jogos da rodada (faltam jogos da temporada para calcular sozinho)' : 'indisponível'),
+    row(d.rounds ? true : null, 'Rodadas', d.rounds ? `${d.rounds} montadas; rodada atual: ${d.focus}` : 'ainda não montadas'),
+    row(d.mode === 'jogos' ? d.odds || null : false, 'Chances até o fim', d.mode !== 'jogos' ? 'precisa de todos os jogos da temporada' : d.odds ? 'calculadas' : 'calculando'),
+    row(d.summary ? d.summary.ok : null, 'Estatísticas do jogo', !d.summary ? 'abra um jogo encerrado ou ao vivo para testar' : d.summary.ok ? `ok às ${hhmm(d.summary.t)}` : `falhou: ${d.summary.error}`),
+    row(d.refresh ? d.refresh.ok : null, 'Última atualização', !d.refresh ? 'aguardando' : d.refresh.ok ? `ok às ${hhmm(d.refresh.t)}` : `falhou às ${hhmm(d.refresh.t)}: ${d.refresh.error}`),
+  ];
+  if (d.cache) items.push(row(true, 'Dados salvos no celular', `${d.cache.count} jogos salvos às ${hhmm(d.cache.t)}`));
+  return `
+    <h2 class="team-title">Status dos dados</h2>
+    <p class="chart-note">Se alguma parte do app não aparecer, tire um print desta tela: ela mostra o que carregou e o que falhou.</p>
+    <ul class="diag">${items.join('')}</ul>
+    ${d.errors.length ? `<section class="sheet-block"><h3 class="sub-title">Erros na tela</h3><ul class="diag-errors">${d.errors.map((e) => `<li><b>${esc(e.part)}</b> ${esc(e.error)}</li>`).join('')}</ul></section>` : ''}
+    <p class="chart-note diag-ua">${esc(d.ua)}${d.modal ? '' : ' · janela de detalhes em modo compatível'}</p>`;
+}

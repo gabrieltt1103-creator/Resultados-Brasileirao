@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Rodada ao Vivo</title>
-  <meta name="description" content="Placar em tempo real da rodada do Brasileirão Série A, com tabela ao vivo, estatísticas e bolão.">
+  <meta name="description" content="Placar em tempo real da rodada do Brasileirão Série A, com tabela ao vivo, simulador e estatísticas.">
   <meta name="theme-color" content="#0b6b3a" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b2a1b" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -50,6 +50,7 @@
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="jogos" aria-selected="true" aria-controls="view-jogos" id="tab-jogos" type="button">Jogos</button>
       <button class="tab" role="tab" data-tab="tabela" aria-selected="false" aria-controls="view-tabela" id="tab-tabela" type="button">Tabela</button>
+      <button class="tab" role="tab" data-tab="simular" aria-selected="false" aria-controls="view-simular" id="tab-simular" type="button">Simular</button>
       <button class="tab" role="tab" data-tab="numeros" aria-selected="false" aria-controls="view-numeros" id="tab-numeros" type="button">Números</button>
     </div>
   </header>
@@ -57,6 +58,7 @@
   <main>
     <section id="view-jogos" data-tab="jogos" role="tabpanel" aria-labelledby="tab-jogos">
       <div id="fav"></div>
+      <div id="others"></div>
       <div id="news"></div>
       <p id="summary" class="summary" hidden></p>
       <div id="matches" class="matches">
@@ -74,6 +76,9 @@
       <div id="table-wrap" class="table-wrap"></div>
       <ul id="legend" class="legend"></ul>
     </section>
+    <section id="view-simular" data-tab="simular" role="tabpanel" aria-labelledby="tab-simular" hidden>
+      <div id="sim" class="sim"></div>
+    </section>
     <section id="view-numeros" data-tab="numeros" role="tabpanel" aria-labelledby="tab-numeros" hidden>
       <div id="stats"></div>
     </section>
@@ -85,6 +90,7 @@
 
   <footer class="foot">
     Dados da ESPN. Atualiza sozinho a cada 30&nbsp;s durante os jogos.
+    <button id="diag" type="button" class="link" data-action="diag">Status dos dados</button>
   </footer>
 
   <dialog id="sheet" class="sheet" aria-label="Detalhes">

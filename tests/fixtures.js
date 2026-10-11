@@ -128,17 +128,20 @@ export function season(now) {
   return { leagues: [{ season: { year: 2026 } }], events };
 }
 
-// Filtra a temporada como a ESPN faria com ?dates=AAAAMMDD-AAAAMMDD (dias locais).
-export function byDates(all, range) {
-  if (!range) {
+// Filtra a temporada como a ESPN faz com ?dates=: ano (2026), mês (202610) ou dia (20261011), em dias locais.
+// Intervalos (20261001-20261031) não são aceitos pela ESPN no Brasileirão: devolve null (erro 400).
+export function byDates(all, dates) {
+  if (!dates) {
     const now = Date.now();
     return { ...all, events: all.events.filter((e) => Math.abs(new Date(e.date) - now) < 4 * 24 * H) };
   }
-  const [a, b] = range.split('-');
-  const day = (s, end) => new Date(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)), end ? 23 : 0, end ? 59 : 0).getTime();
-  const from = day(a, false);
-  const to = day(b || a, true);
-  return { ...all, events: all.events.filter((e) => { const t = new Date(e.date).getTime(); return t >= from && t <= to; }) };
+  if (!/^\d{4}(\d{2}(\d{2})?)?$/.test(dates)) return null;
+  const y = Number(dates.slice(0, 4));
+  const m = dates.length >= 6 ? Number(dates.slice(4, 6)) - 1 : null;
+  const d = dates.length === 8 ? Number(dates.slice(6, 8)) : null;
+  const from = new Date(y, m ?? 0, d ?? 1).getTime();
+  const to = d != null ? new Date(y, m, d + 1).getTime() : m != null ? new Date(y, m + 1, 1).getTime() : new Date(y + 1, 0, 1).getTime();
+  return { ...all, events: all.events.filter((e) => { const t = new Date(e.date).getTime(); return t >= from && t < to; }) };
 }
 
 // Classificação oficial coerente com os jogos encerrados.

@@ -75,7 +75,7 @@ export function storyTags(s) {
 export function headlines({ round, table, zones, focus, now = new Date() }) {
   const items = [];
   const add = (prio, tag, text, ev, tone = 'gol') => items.push({ prio, tag, text, tone, ev: ev?.id || null, t: ev?.date?.getTime?.() || 0 });
-  const rankOf = table ? (id) => table.preById.get(id)?.pos : null;
+  const rankOf = table && focus ? (id) => table.preById.get(id)?.pos : null;
   const liveRank = table ? (id) => table.byId.get(id)?.pos : null;
 
   if (focus && table?.started) {

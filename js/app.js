@@ -1,5 +1,5 @@
 import * as espn from './espn.js';
-import { buildRounds, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
+import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, matchStory, roundStats, trends } from './insights.js';
 import { chances, model, randomScore } from './sim.js';
@@ -80,7 +80,8 @@ function cleanSims(raw) {
   return out;
 }
 
-const eventList = () => [...state.events.values()];
+// Jogos válidos: sem o registro antigo de jogos adiados que já ganharam nova data.
+const eventList = () => dropReplaced([...state.events.values()]);
 const focusRound = () => state.rounds[state.focusIdx];
 const preRank = (id) => state.table?.preById.get(id)?.pos;
 const liveRank = (id) => state.table?.byId.get(id)?.pos;
@@ -142,15 +143,17 @@ async function loadSeason() {
   saveCache();
 }
 
-// Atualização rápida: ontem, hoje e amanhã (onde estão os jogos ao vivo) e o miolo da rodada aberta.
+// Atualização rápida, dia a dia: ontem, hoje e amanhã (onde estão os jogos ao vivo) e os dias
+// da rodada aberta que ainda têm jogo por terminar.
 async function refreshHot() {
   const today = new Date();
-  const ranges = [[addDays(today, -1), addDays(today, 1)]];
+  const days = new Map();
+  for (const d of [addDays(today, -1), today, addDays(today, 1)]) days.set(ymd(d), d);
   const r = state.rounds[state.roundIdx];
-  if (r && !isFinished(r) && (r.coreLast < addDays(today, -1) || r.coreFirst > addDays(today, 1))) ranges.push([addDays(r.coreFirst, -1), addDays(r.coreLast, 1)]);
+  if (r) for (const e of r.events) if (e.status.kind === 'pre' || e.status.kind === 'live') days.set(ymd(e.date), e.date);
   const finished = () => eventList().filter((e) => e.status.kind === 'post').length;
   const before = finished();
-  const res = await Promise.all(ranges.map(([a, b]) => espn.fetchScoreboard(`${ymd(a)}-${ymd(b)}`, 100)));
+  const res = await Promise.all([...days.values()].slice(0, 6).map((d) => espn.fetchDay(d)));
   res.forEach((json) => ingest(json?.events));
   if (finished() !== before || Date.now() - state.lastStandings > STANDINGS_MS) await loadStandings();
   if (Date.now() - state.lastCache > 5 * 60e3) saveCache();
@@ -438,7 +441,8 @@ function renderGames() {
     delta: (id) => (isFocus ? state.table?.byId.get(id)?.delta || 0 : 0),
     favorite: state.favorite,
   };
-  const card = (ev, note) => ui.matchCard(ev, { ...ctxBase, flash: takeFlash(ev.id), story: matchStory(ev, preRank), note });
+  // Zebra compara com a tabela de agora, então só vale na rodada em andamento.
+  const card = (ev, note) => ui.matchCard(ev, { ...ctxBase, flash: takeFlash(ev.id), story: matchStory(ev, isFocus ? preRank : null), note });
 
   // Jogos de hoje que são de outras rodadas (remarcados), para não passarem despercebidos.
   const others = isFocus ? sortEvents(eventList()).filter((e) => !r.events.includes(e)
@@ -592,7 +596,7 @@ function renderSheet() {
     html = ui.matchSheet(ev, {
       table: state.table, scen, stats,
       statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
-      formById: state.formById, favorite: state.favorite, story: matchStory(ev, preRank),
+      formById: state.formById, favorite: state.favorite, story: matchStory(ev, inFocus ? preRank : null),
       roundLabel: roundName(state.roundOf.get(ev.id)), now,
     });
   } else if (spec.type === 'team') {
@@ -608,7 +612,7 @@ function renderSheet() {
   } else if (spec.type === 'picker') {
     html = ui.teamPicker(allTeams(), state.favorite);
   } else if (spec.type === 'diag') {
-    html = ui.diagSheet({ ...state.diag, events: state.events.size, rounds: state.rounds.length, focus: roundName(focusRound()), complete: state.complete, seasonComplete: state.seasonComplete, mode: state.table?.mode || null, odds: !!state.oddsBase, ua: navigator.userAgent, modal: hasModal });
+    html = ui.diagSheet({ ...state.diag, events: state.events.size, rounds: state.rounds.length, roundsMethod: state.rounds.method, roundsWhy: state.rounds.why, focus: roundName(focusRound()), complete: state.complete, seasonComplete: state.seasonComplete, mode: state.table?.mode || null, odds: !!state.oddsBase, ua: navigator.userAgent, modal: hasModal });
   }
   el.sheetBody.innerHTML = html;
 }
@@ -650,10 +654,14 @@ function selectRound(idx) {
   state.selectedBar = null;
 }
 
+// Trocar de rodada não busca nada na rede, a não ser que a rodada ainda tenha jogo por terminar.
+let goTimer = 0;
 function go(delta) {
   selectRound(state.roundIdx + delta);
   render();
-  tick();
+  clearTimeout(goTimer);
+  const r = state.rounds[state.roundIdx];
+  if (r && !isFinished(r)) goTimer = setTimeout(tick, 700);
 }
 
 function setTab(tab) {
@@ -788,10 +796,11 @@ el.sheetBack.addEventListener('click', () => {
 el.sheet.addEventListener('click', (e) => { if (e.target === el.sheet) closeSheet(); });
 el.sheet.addEventListener('close', sheetClosed);
 
-// Escudo que não carrega vira as iniciais do time.
+// Escudo que não carrega: tenta a imagem original; se ela também falhar, mostra as iniciais do time.
 document.addEventListener('error', (e) => {
   const img = e.target;
   if (!(img instanceof HTMLImageElement) || !img.dataset.name) return;
+  if (img.dataset.original) { img.src = img.dataset.original; delete img.dataset.original; return; }
   const span = document.createElement('span');
   span.className = 'crest-fallback';
   span.style.cssText = img.style.cssText;

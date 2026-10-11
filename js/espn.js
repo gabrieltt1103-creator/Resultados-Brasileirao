@@ -18,16 +18,21 @@ export const fetchSummary = (id) => getJSON(`${SUMMARY}?event=${encodeURICompone
 
 const pad = (n) => String(n).padStart(2, '0');
 
+// A ESPN aceita no parâmetro dates um ano (2026), um mês (202610) ou um dia (20261011);
+// intervalos como 20261001-20261031 voltam com erro 400 no Brasileirão.
+export const fetchDay = (d) => fetchScoreboard(`${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`, 100);
+
 /**
- * Todos os jogos do ano, buscados mês a mês em paralelo.
- * Devolve {events, months, failed}: failed lista os meses que não vieram.
+ * Todos os jogos do ano numa chamada; se ela falhar, mês a mês em paralelo.
+ * Devolve {events, failed, season}: failed lista os meses que não vieram.
  */
 export async function fetchSeason(year) {
+  try {
+    const json = await fetchScoreboard(String(year), 1000);
+    if (json?.events?.length) return { events: json.events, failed: [], season: json.leagues?.[0]?.season?.year || null };
+  } catch { /* tenta por mês */ }
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
-  const results = await Promise.allSettled(months.map((m) => {
-    const last = new Date(year, m, 0).getDate();
-    return fetchScoreboard(`${year}${pad(m)}01-${year}${pad(m)}${pad(last)}`, 200);
-  }));
+  const results = await Promise.allSettled(months.map((m) => fetchScoreboard(`${year}${pad(m)}`, 200)));
   const byId = new Map();
   const failed = [];
   let season = null;
@@ -97,7 +102,8 @@ export function parseEvent(e) {
       kind,
       team: String(d.team?.id ?? ''),
       min: parseMinute(d.clock?.displayValue),
-      who: a?.shortName || a?.displayName || '',
+      // "Memphis Depay" cabe; "Alexander Barboza" vira "A. Barboza".
+      who: (a?.displayName && a.displayName.length <= 14 ? a.displayName : a?.shortName || a?.displayName) || '',
       pen: !!d.penaltyKick,
       og: !!d.ownGoal,
     });

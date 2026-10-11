@@ -39,7 +39,9 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 
 Atualiza sozinho a cada 30 s durante os jogos e a cada 2 min fora deles, e pausa quando o app sai da tela para poupar bateria e dados. Tema claro e escuro conforme o celular.
 
-Os dados vêm da API pública da ESPN (`site.api.espn.com`), chamada direto do navegador, sem servidor e sem chave de API. Ao abrir, o app busca a temporada inteira (mês a mês) e guarda no celular para abrir mais rápido da próxima vez; depois só atualiza os jogos de ontem, hoje e amanhã. A ESPN não informa a rodada de cada jogo: o app monta as rodadas sabendo que cada time joga uma vez por rodada, e os jogos fora da data voltam para a rodada em que faltam os dois times.
+Os dados vêm da API pública da ESPN (`site.api.espn.com`), chamada direto do navegador, sem servidor e sem chave de API. Ao abrir, o app busca a temporada inteira numa chamada (`dates=2026`) e guarda no celular para abrir mais rápido da próxima vez; depois só atualiza, dia a dia, os jogos de ontem, hoje e amanhã. A ESPN aceita no parâmetro `dates` um ano, um mês (`202610`) ou um dia (`20261011`), mas recusa intervalos (`20261001-20261031`) no Brasileirão.
+
+A ESPN não informa a rodada de cada jogo. O app usa o fato de que, no Brasileirão, a rodada r+19 repete a rodada r com o mando invertido: os dois jogos de cada confronto ficam no mesmo par de rodadas, então um jogo adiado, antecipado ou de rodada dividida é colocado na rodada certa pelo outro jogo do confronto. Conferido contra as rodadas oficiais (Cartola FC) de 2026: as 380 partidas na rodada certa. Quando a ESPN remarca um jogo adiado, ela cria um jogo novo e mantém o antigo como "adiado"; o app descarta o antigo. Sem a temporada completa, o app agrupa por datas (menos preciso com jogos remarcados).
 
 ## Como abrir no celular
 
@@ -58,7 +60,7 @@ Para usar como app: abra o link no celular e escolha **Adicionar à tela inicial
 
 ```sh
 npm start   # servidor local em http://localhost:8080
-npm test    # testes da lógica (rodadas, tabela ao vivo, manchetes, números, simulador)
+npm test    # testes da lógica, incluindo a temporada real de 2026 (tests/data)
 ```
 
 Não há build nem dependências: os módulos em `js/` rodam direto no navegador.
@@ -74,6 +76,6 @@ Não há build nem dependências: os módulos em `js/` rodam direto no navegador
 | `js/fx.js` | Som de gol, vibração e confete |
 | `js/ui.js` | Monta o HTML de cada parte da tela |
 | `js/app.js` | Estado, atualização automática e interações |
-| `tests/` | Dados de exemplo no formato da ESPN e testes |
+| `tests/` | Testes: temporada fictícia no formato da ESPN e retrato da temporada real de 2026 com as rodadas oficiais |
 
 A API da ESPN não é oficial e pode mudar de formato sem aviso. Se o app parar de mostrar os jogos, o ponto a ajustar é `js/espn.js`.

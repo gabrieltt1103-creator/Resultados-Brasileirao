@@ -152,7 +152,16 @@ export function zonesFor(standings, teamCount = standings.length) {
   const byPos = new Array(n + 1).fill(null);
   const hasNotes = standings.some((t) => t.note?.color);
   if (hasNotes) standings.forEach((t, i) => { if (t.note) byPos[i + 1] = { name: zoneName(t.note.description), color: t.note.color }; });
-  else if (n === 20) for (let p = 17; p <= 20; p++) byPos[p] = { name: 'Rebaixamento', color: 'var(--live)' };
+  else if (n === 20) {
+    // Divisão usual da Série A: G4 direto na Libertadores, 5º e 6º na fase prévia, 7º a 12º na
+    // Sul-Americana e Z4. As vagas podem mudar no fim do ano (títulos de copas).
+    for (let p = 1; p <= 20; p++) {
+      if (p <= 4) byPos[p] = { name: 'Libertadores', color: 'var(--zone-lib)' };
+      else if (p <= 6) byPos[p] = { name: 'Pré-Libertadores', color: 'var(--zone-pre)' };
+      else if (p <= 12) byPos[p] = { name: 'Sul-Americana', color: 'var(--zone-sul)' };
+      else if (p >= 17) byPos[p] = { name: 'Rebaixamento', color: 'var(--live)' };
+    }
+  }
   let g = 0;
   while (byPos[g + 1] && /Libertadores/.test(byPos[g + 1].name)) g++;
   const rel = byPos.map((z, i) => (z?.name === 'Rebaixamento' ? i : null)).filter((x) => x != null);

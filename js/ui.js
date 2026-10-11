@@ -7,11 +7,19 @@ const ord = (n) => (n ? `${n}º` : '');
 
 const initials = (name) => (name || '?').replace(/[^\p{L}\p{N} ]/gu, '').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 3).toUpperCase() || '?';
 
-// Escudo do time. Se a imagem falhar, o app troca pelas iniciais (ver app.js).
+// Logos da ESPN vêm em 500 px (30 a 70 KB); o redimensionador da própria ESPN entrega 64 ou 128 px (2 a 8 KB).
+function smallLogo(url, size) {
+  const m = /^https?:\/\/a\.espncdn\.com(\/i\/teamlogos\/[^?]+)$/.exec(url || '');
+  return m ? `https://a.espncdn.com/combiner/i?img=${m[1]}&w=${size}&h=${size}` : url;
+}
+
+// Escudo do time. Se a imagem pequena falhar, o app tenta a original e depois mostra as iniciais (ver app.js).
 export function crest(url, name, size = 26, cls = 'crest') {
   const style = `width:${size}px;height:${size}px;font-size:${Math.max(8, Math.round(size * 0.34))}px`;
   if (!url) return `<span class="crest-fallback" style="${style}" aria-hidden="true">${esc(initials(name))}</span>`;
-  return `<img class="${cls}" style="${style}" src="${esc(url)}" data-name="${esc(initials(name))}" alt="" loading="lazy" decoding="async">`;
+  const small = smallLogo(url, size > 32 ? 128 : 64);
+  const fallback = small !== url ? ` data-original="${esc(url)}"` : '';
+  return `<img class="${cls}" style="${style}" src="${esc(small)}"${fallback} data-name="${esc(initials(name))}" alt="" loading="lazy" decoding="async">`;
 }
 
 const star = '<svg class="star" viewBox="0 0 24 24" width="14" height="14" aria-label="Meu time"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" fill="currentColor"/></svg>';
@@ -581,7 +589,9 @@ export function diagSheet(d) {
     row(s ? s.count > 0 && !s.failed.length : null, 'Jogos da temporada', seasonText),
     row(st ? st.ok : null, 'Classificação oficial da ESPN', !st ? 'ainda não carregou' : st.ok ? `${st.count} times às ${hhmm(st.t)}` : `falhou às ${hhmm(st.t)}: ${st.error}`),
     row(d.mode ? true : d.season ? false : null, 'Tabela do app', d.mode === 'jogos' ? 'calculada a partir de todos os jogos (ao vivo e exata)' : d.mode === 'espn' ? 'classificação da ESPN corrigida com os jogos da rodada (faltam jogos da temporada para calcular sozinho)' : 'indisponível'),
-    row(d.rounds ? true : null, 'Rodadas', d.rounds ? `${d.rounds} montadas; rodada atual: ${d.focus}` : 'ainda não montadas'),
+    row(d.rounds ? d.roundsMethod === 'espelho' : null, 'Rodadas', !d.rounds ? 'ainda não montadas'
+      : d.roundsMethod === 'espelho' ? `${d.rounds} montadas pelo espelho turno/returno, com os jogos remarcados na rodada certa; atual: ${d.focus}`
+        : `${d.rounds} montadas pelas datas (${d.roundsWhy}); jogos remarcados podem ficar fora da rodada; atual: ${d.focus}`),
     row(d.mode === 'jogos' ? d.odds || null : false, 'Chances até o fim', d.mode !== 'jogos' ? 'precisa de todos os jogos da temporada' : d.odds ? 'calculadas' : 'calculando'),
     row(d.summary ? d.summary.ok : null, 'Estatísticas do jogo', !d.summary ? 'abra um jogo encerrado ou ao vivo para testar' : d.summary.ok ? `ok às ${hhmm(d.summary.t)}` : `falhou: ${d.summary.error}`),
     row(d.refresh ? d.refresh.ok : null, 'Última atualização', !d.refresh ? 'aguardando' : d.refresh.ok ? `ok às ${hhmm(d.refresh.t)}` : `falhou às ${hhmm(d.refresh.t)}: ${d.refresh.error}`),

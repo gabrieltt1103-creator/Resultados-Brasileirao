@@ -1,0 +1,10 @@
+{
+  "name": "rodada-ao-vivo",
+  "private": true,
+  "type": "module",
+  "description": "Placar em tempo real da rodada do Brasileirão (site estático).",
+  "scripts": {
+    "start": "npx http-server -p 8080 -c-1 .",
+    "test": "node --test \"tests/*.test.js\""
+  }
+}

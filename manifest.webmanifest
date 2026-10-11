@@ -1,7 +1,7 @@
 {
   "name": "Rodada ao Vivo · Brasileirão",
   "short_name": "Rodada",
-  "description": "Placar em tempo real da rodada do Brasileirão Série A.",
+  "description": "Placar em tempo real da rodada do Brasileirão Série A, com tabela ao vivo, estatísticas e bolão.",
   "lang": "pt-BR",
   "start_url": "./",
   "scope": "./",

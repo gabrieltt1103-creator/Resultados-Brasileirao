@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Rodada ao Vivo</title>
+  <meta name="description" content="Placar em tempo real da rodada do Brasileirão Série A.">
+  <meta name="theme-color" content="#0b6b3a" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b2a1b" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Rodada">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://site.api.espn.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="band">
+    <div class="band-top">
+      <span class="league">Brasileirão <span id="season"></span></span>
+      <button id="refresh" class="refresh" type="button" aria-label="Atualizar agora">
+        <span id="pulse" class="pulse" hidden></span>
+        <span id="updated" class="updated">Carregando…</span>
+        <svg class="refresh-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <nav class="round-nav" aria-label="Rodadas">
+      <button id="prev" class="arrow" type="button" aria-label="Rodada anterior" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="round-title">
+        <h1 id="round-name">Rodada</h1>
+        <p id="round-dates" class="round-dates">&nbsp;</p>
+      </div>
+      <button id="next" class="arrow" type="button" aria-label="Próxima rodada" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </nav>
+    <div class="tabs" role="tablist">
+      <button id="tab-jogos" class="tab" role="tab" aria-selected="true" aria-controls="view-jogos" type="button">Jogos</button>
+      <button id="tab-tabela" class="tab" role="tab" aria-selected="false" aria-controls="view-tabela" type="button">Tabela</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-jogos" role="tabpanel" aria-labelledby="tab-jogos">
+      <p id="summary" class="summary" hidden></p>
+      <div id="matches" class="matches">
+        <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+      </div>
+    </section>
+    <section id="view-tabela" role="tabpanel" aria-labelledby="tab-tabela" hidden>
+      <div id="table-wrap" class="table-wrap"></div>
+      <ul id="legend" class="legend"></ul>
+    </section>
+    <div id="error" class="error" role="alert" hidden>
+      <p id="error-text"></p>
+      <button id="retry" type="button">Tentar de novo</button>
+    </div>
+  </main>
+
+  <footer class="foot">
+    Dados da ESPN. Atualiza sozinho a cada 30&nbsp;s durante os jogos.
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

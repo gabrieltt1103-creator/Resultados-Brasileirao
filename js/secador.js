@@ -107,17 +107,34 @@ const goodOf = (objective, values) => (objective === 'z' ? values.map((p) => 1 -
 // Lado raro da chance: 3% de risco de cair e 97% de G6 são "pequenos" do mesmo jeito.
 const rareOf = (list) => Math.max(...list.map((p) => Math.min(p, 1 - p)));
 
+// Risco pequeno com uma casa decimal ("3,6%"), como nas comparações das linhas.
+const fine = (p) => (p >= 0.005 && p < 0.1 ? `${(p * 100).toFixed(1).replace('.', ',')}%` : pct(p));
+
+// Dois números para comparar: inteiros, ou com uma casa decimal quando arredondados ficariam iguais
+// (risco de 3,6% contra 4,1%, que viraria "4% contra 4%").
+function pctPair(a, b) {
+  if (pct(a) !== pct(b) || a >= 0.995 || b >= 0.995) return [pct(a), pct(b)];
+  const fine = (p) => `${(p * 100).toFixed(1).replace('.', ',')}%`;
+  return [fine(a), fine(b)];
+}
+
 /**
  * O resultado do jogo muda as chances do time de verdade? 2 pontos percentuais ou mais entre o melhor e o
- * pior resultado; com chance pequena (3% de risco de cair), basta mudar um quarto dela. E os números
- * mostrados precisam ser diferentes.
+ * pior resultado. Com chance pequena vale menos: no título e no G, um quarto dela (se for de 5% ou mais); no risco de cair,
+ * que o torcedor acompanha mesmo pequeno, um oitavo (com 3,6% de risco, meio ponto: um jogo entre dois
+ * concorrentes diretos já muda isso; um jogo sem ninguém da briga, não). Abaixo de 0,3 ponto é
+ * oscilação do sorteio.
  */
-function weighs(good, shown) {
+function weighs(good, shown, objective) {
   const hi = Math.max(...good);
   const lo = Math.min(...good);
   const diff = hi - lo;
-  if (!(diff >= 0.02 || (diff >= 0.005 && diff >= 0.25 * rareOf(good)))) return false;
-  return pct(shown[good.indexOf(hi)]) !== pct(shown[good.indexOf(lo)]);
+  const rare = rareOf(good);
+  // Título ou G quase impossível (menos de 5%) não vale secada por décimos.
+  const share = objective === 'z' ? 0.12 : rare >= 0.05 ? 0.25 : Infinity;
+  if (!(diff >= 0.02 || (diff >= 0.003 && diff >= share * rare))) return false;
+  const [a, b] = pctPair(shown[good.indexOf(hi)], shown[good.indexOf(lo)]);
+  return a !== b;
 }
 
 // Torcer pelo rival só com ganho de verdade: 3 pontos ou mais (um terço da chance, se ela é pequena).
@@ -183,7 +200,7 @@ export function verdict(ev, { team, rivals = new Set(), objective = null, odds =
     return v;
   }
   const good = values && goodOf(objective, values);
-  if (good && weighs(good, values)) {
+  if (good && weighs(good, values, objective)) {
     const b = good.indexOf(Math.max(...good));
     const w = good.indexOf(Math.min(...good));
     const mid = 3 - b - w;
@@ -256,6 +273,9 @@ export function pick(verdicts, max = 3) {
 const GOAL = { title: () => 'Chance de título', g: (zones) => `Chance de ${zones?.gLabel || 'G6'}`, z: () => 'Risco de cair' };
 const YOUR = { title: () => 'a sua chance de título', g: (zones) => `a sua chance de ${zones?.gLabel || 'G6'}`, z: () => 'a sua fuga da queda' };
 
+// Quem está quase rebaixado (risco de 90% ou mais) pensa na chance de escapar, não no risco de cair.
+const escaping = (objective, values) => objective === 'z' && values.every((p) => p >= 0.9);
+
 // "Chance de G6: 87% com vitória do Grêmio, 84% com a do Cruzeiro."
 function numbers(ev, v, objective, zones) {
   const res = (i, after) => {
@@ -264,7 +284,11 @@ function numbers(ev, v, objective, zones) {
     return after ? `a ${doo(t.name)}` : `vitória ${doo(t.name)}`;
   };
   const both = v.best !== 1 && v.worst !== 1;
-  return `${GOAL[objective](zones)}: ${pct(v.values[v.best])} com ${res(v.best)}, ${pct(v.values[v.worst])} com ${res(v.worst, both)}.`;
+  const esc = escaping(objective, v.values);
+  const val = (i) => (esc ? 1 - v.values[i] : v.values[i]);
+  // Risco (ou chance de escapar) pequeno sempre com uma casa, para todas as linhas da rodada baterem.
+  const [best, worst] = objective === 'z' && val(v.best) < 0.1 && val(v.worst) < 0.1 ? [fine(val(v.best)), fine(val(v.worst))] : pctPair(val(v.best), val(v.worst));
+  return `${esc ? 'Chance de escapar' : GOAL[objective](zones)}: ${best} com ${res(v.best)}, ${worst} com ${res(v.worst, both)}.`;
 }
 
 // O que o rival perde: "Se o Flamengo perder, a chance de título dele cai para 47%."
@@ -306,17 +330,23 @@ export function verdictText(ev, v, { objective, zones } = {}) {
     case 'mine': {
       const chip = v.rival ? 'Clássico' : 'Seu jogo';
       if (!v.values) return { chip, text: v.rival ? 'Vale mais que três pontos.' : '', state: '' };
-      const [h, d, a] = v.values;
+      const esc = escaping(objective, v.values);
+      const [h, d, a] = v.values.map((p) => (esc ? 1 - p : p));
       if (done && now != null) {
         const r = v.home ? now : -now;
-        const p = v.values[RESULT.indexOf(now)];
-        return { chip, text: `Com ${r > 0 ? 'a vitória' : r < 0 ? 'a derrota' : 'o empate'}, ${chanceOf(objective, zones)} ficou em ${pct(p)}.`, state: '' };
+        const p = [h, d, a][RESULT.indexOf(now)];
+        return { chip, text: `Com ${r > 0 ? 'a vitória' : r < 0 ? 'a derrota' : 'o empate'}, ${esc ? 'a chance de escapar' : chanceOf(objective, zones)} ficou em ${objective === 'z' ? fine(p) : pct(p)}.`, state: '' };
       }
       const [win, lose] = v.home ? [h, a] : [a, h];
-      return { chip, text: `${GOAL[objective](zones)}: ${pct(win)} se vencer, ${pct(d)} se empatar, ${pct(lose)} se perder.`, state: '' };
+      const f = objective === 'z' ? fine : pct;
+      return { chip, text: `${esc ? 'Chance de escapar' : GOAL[objective](zones)}: ${f(win)} se vencer, ${f(d)} se empatar, ${f(lose)} se perder.`, state: '' };
     }
-    case 'help':
-      return { chip: `Seque ${o(dry)}`, text: done || !cheer ? nums : `Torça ${pelo(cheer)}. ${nums}`, state };
+    case 'help': {
+      if (done) return { chip: `Seque ${o(dry)}`, text: nums, state };
+      // Sem um vencedor para torcer: o empate é o melhor, mas a vitória do outro quase não faz diferença.
+      const other = v.dry.id === ev.home.id ? ev.away : ev.home;
+      return { chip: `Seque ${o(dry)}`, text: `${cheer ? `Torça ${pelo(cheer)}.` : `Empate ou vitória ${doo(other.name)} servem.`} ${nums}`, state };
+    }
     case 'double':
       return { chip: 'Seca em dobro', text: done ? nums : `Secar ${o(dry)}, seu rival, ainda ajuda o seu time. ${nums}`, state };
     case 'nose':
@@ -338,7 +368,9 @@ export function verdictText(ev, v, { objective, zones } = {}) {
         state,
       };
     case 'draw':
-      return { chip: 'Torça pelo empate', text: `${nums}${done ? '' : v.both ? ' E os dois rivais perdem pontos.' : v.rival ? ' E o rival ainda perde pontos.' : ''}`, state };
+      // O empate é o melhor quando a vitória de qualquer um dos dois atrapalha: os dois brigam com o seu time.
+      if (done) return { chip: 'Torça pelo empate', text: nums, state };
+      return { chip: 'Torça pelo empate', text: `Os dois brigam com você. ${nums}${v.both ? ' E os dois rivais perdem pontos.' : v.rival ? ' E o rival ainda perde pontos.' : ''}`, state };
     case 'nodraw':
       return { chip: 'Tem que ter vencedor', text: done ? nums : `Tanto faz quem vença: o empate é o pior para você. ${nums}`, state };
     case 'derby': {
@@ -380,7 +412,8 @@ export function secadorSummary({ team, objective, base, verdicts, zones, ready =
   } else if (objective === 'z') {
     const p = base.z;
     head = p >= 0.9 ? `${team.name} precisa de um milagre` : p < 0.1 ? `${team.name} ainda de olho na queda` : `${team.name} contra o rebaixamento`;
-    sub = `${pct(p)} de risco de cair hoje`;
+    // Com risco pequeno, uma casa decimal, como nas linhas dos jogos ("3,6% com empate").
+    sub = p >= 0.9 ? `${fine(1 - p)} de chance de escapar hoje` : `${fine(p)} de risco de cair hoje`;
   } else head = `Nada em jogo para ${o(team.name)} na tabela`;
   const shown = verdicts.filter((x) => x.v?.shown && x.v.kind !== 'mine');
   const obj = shown.filter((x) => [...PLAIN, 'double', 'nose'].includes(x.v.kind)).sort((a, b) => b.v.swing - a.v.swing);

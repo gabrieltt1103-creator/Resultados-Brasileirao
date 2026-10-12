@@ -360,10 +360,11 @@ test('secador: para quem torcer em cada jogo', () => {
   r = read(cap, game('Fluminense', 'Santos'), [0.58, 0.63, 0.57]);
   assert.equal(r.v.kind, 'draw');
   assert.equal(r.chip, 'Torça pelo empate');
-  assert.equal(r.text, 'Chance de G6: 63% com empate, 57% com vitória do Santos.');
+  assert.equal(r.text, 'Os dois brigam com você. Chance de G6: 63% com empate, 57% com vitória do Santos.');
   r = read(cap, game('Fluminense', 'Santos'), [0.62, 0.63, 0.57]);
   assert.equal(r.v.kind, 'help');
   assert.equal(r.chip, 'Seque o Santos');
+  assert.equal(r.text, 'Empate ou vitória do Fluminense servem. Chance de G6: 63% com empate, 57% com vitória do Santos.');
 
   // Secar o rival também ajuda; empate é o pior.
   assert.equal(read('Atlético-MG', game('Grêmio', 'Cruzeiro'), [0.64, 0.62, 0.59]).chip, 'Seca em dobro');
@@ -389,10 +390,17 @@ test('secador: para quem torcer em cada jogo', () => {
   assert.equal(r.state, 'Não deu');
   assert.equal(read('Vasco', game('Flamengo', 'Fluminense'), null, null).v.kind, 'none');
 
-  // Risco de cair pequeno: um quarto do risco já importa; menos que isso, não.
+  // Risco de cair pequeno: um oitavo do risco já importa (com uma casa decimal); oscilação do sorteio, não.
   r = read('Vasco', game('Grêmio', 'Cruzeiro'), [0.044, 0.035, 0.031], 'z');
-  assert.equal(r.text, 'Torça pelo Cruzeiro. Risco de cair: 3% com vitória do Cruzeiro, 4% com a do Grêmio.');
-  assert.equal(read('Vasco', game('Corinthians', 'Vitória'), [0.042, 0.036, 0.032], 'z').v.kind, 'none');
+  assert.equal(r.text, 'Torça pelo Cruzeiro. Risco de cair: 3,1% com vitória do Cruzeiro, 4,4% com a do Grêmio.');
+  assert.equal(read('Vasco', game('Corinthians', 'Vitória'), [0.0362, 0.036, 0.0358], 'z').v.kind, 'none');
+  // Grêmio 1 x 1 Internacional, rodada 30 de 2026, para o Vasco (3,6% de risco): os dois brigam com ele, o empate é o melhor.
+  r = read('Vasco', game('Grêmio', 'Internacional', 'post', 1, 1), [0.0413, 0.036, 0.0403], 'z');
+  assert.deepEqual([r.v.kind, r.chip, r.text, r.state], ['draw', 'Torça pelo empate', 'Risco de cair: 3,6% com empate, 4,1% com vitória do Grêmio.', 'Deu certo']);
+  assert.equal(read('Vasco', game('Grêmio', 'Internacional'), [0.0413, 0.036, 0.0403], 'z').text, 'Os dois brigam com você. Risco de cair: 3,6% com empate, 4,1% com vitória do Grêmio.');
+  // Título ou G6 quase impossível não vale secada por décimos; quase rebaixado pensa em escapar.
+  assert.equal(read(cap, game('Grêmio', 'Cruzeiro'), [0.02, 0.016, 0.013]).v.kind, 'none');
+  assert.equal(read('Remo', game('Grêmio', 'Internacional'), [0.976, 0.970, 0.975], 'z').text, 'Os dois brigam com você. Chance de escapar: 3,0% com empate, 2,4% com vitória do Grêmio.');
 
   // O próprio jogo: a chance em cada resultado; contra o rival, é clássico.
   assert.equal(read(cap, game('Athletico Paranaense', 'Palmeiras'), [0.942, 0.868, 0.821]).text, 'Chance de G6: 94% se vencer, 87% se empatar, 82% se perder.');
@@ -403,7 +411,7 @@ test('secador: para quem torcer em cada jogo', () => {
   assert.equal(r.text, 'Chance de G6: 89% com vitória do Grêmio, 86% com a do Cruzeiro.');
   assert.equal(r.state, 'Não deu');
   assert.equal(read(cap, game('Athletico Paranaense', 'Palmeiras', 'post', 1, 1), [0.942, 0.868, 0.821]).text, 'Com o empate, a chance de G6 ficou em 87%.');
-  assert.equal(read('Vasco', game('Remo', 'Vasco', 'post', 0, 2), [0.06, 0.04, 0.01], 'z').text, 'Com a vitória, o risco de cair ficou em 1%.');
+  assert.equal(read('Vasco', game('Remo', 'Vasco', 'post', 0, 2), [0.06, 0.04, 0.01], 'z').text, 'Com a vitória, o risco de cair ficou em 1,0%.');
   const fla = { Flamengo: { objective: 'title', win: 0.69, draw: 0.54, lose: 0.47 } };
   r = read('Vasco', game('Bahia', 'Flamengo', 'post', 2, 0), null, null, fla);
   assert.deepEqual([r.text, r.state], ['O Flamengo perdeu: a chance de título dele ficou em 47%.', 'Deu certo']);
@@ -450,6 +458,8 @@ test('secador: no máximo 3 jogos que só mexem no objetivo, e o cartão aponta 
   // Situação do time no título do cartão.
   const head = (objective, b, name = 'Remo') => secadorSummary({ team: club(name), objective, base: { title: 0, g: 0, z: 0, ...b }, zones: zz, verdicts: [] }).head;
   assert.equal(head('z', { z: 0.97 }), 'Remo precisa de um milagre');
+  assert.equal(secadorSummary({ team: club('Remo'), objective: 'z', base: { title: 0, g: 0, z: 0.97 }, zones: zz, verdicts: [] }).sub, '3,0% de chance de escapar hoje');
+  assert.equal(secadorSummary({ team: club('Vasco'), objective: 'z', base: { title: 0, g: 0, z: 0.036 }, zones: zz, verdicts: [] }).sub, '3,6% de risco de cair hoje');
   assert.equal(head('z', { z: 0.04 }, 'Vasco'), 'Vasco ainda de olho na queda');
   assert.equal(head('title', { title: 0.93 }, 'Flamengo'), 'Flamengo com a mão na taça');
   assert.equal(head(null, {}, 'Red Bull Bragantino'), 'Nada em jogo para o Red Bull Bragantino na tabela');

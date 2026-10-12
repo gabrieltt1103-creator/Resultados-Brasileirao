@@ -417,14 +417,18 @@ export function matchFlow(plays, now = null) {
   };
   let nowSlot = null;
   if (now) nowSlot = now.extra === 99 ? half : slotOf(now) + 1;
-  const net = Array.from({ length: slots }, (_, i) => (nowSlot != null && i >= nowSlot ? 0 : wave(raw.home, i) - wave(raw.away, i)));
+  // Pressão de cada time no minuto (a onda dos lances dele) e o saldo entre os dois.
+  const side = (a) => Array.from({ length: slots }, (_, i) => (nowSlot != null && i >= nowSlot ? 0 : wave(a, i)));
+  const home = side(raw.home);
+  const away = side(raw.away);
+  const net = home.map((v, i) => v - away[i]);
   const label = (i) => {
     const m = i < half ? i + 1 : 46 + (i - half);
     return i < half ? (m <= 45 ? `${m}'` : `45+${m - 45}'`) : (m <= 90 ? `${m}'` : `90+${m - 90}'`);
   };
   // Lances usados, com o minuto (posição no gráfico), para a leitura do jogo contar chutes e escanteios.
   const list = used.map((p) => ({ type: p.type, side: p.side, w: p.w, i: slotOf(p) }));
-  return { slots, half, net, goals, now: nowSlot, plays: used.length, list, label };
+  return { slots, half, home, away, net, goals, now: nowSlot, plays: used.length, list, label };
 }
 
 // ---------- leitura do jogo ----------

@@ -360,16 +360,18 @@ function fact(label, ev) {
 
 /**
  * Fluxo da partida: pressão de cada time minuto a minuto (mandante para cima, visitante para baixo),
- * com os gols e o intervalo; num jogo ao vivo, o que ainda não aconteceu fica apagado.
+ * com os gols e o intervalo; num jogo ao vivo, o que ainda não aconteceu fica apagado. Cada time tem a
+ * sua barra no mesmo minuto: espaço vazio é jogo parado; barra dos dois lados é jogo lá e cá.
  */
 export function flowChart(flow, ev, note = '') {
   const W = flow.slots * 4;
-  const max = Math.max(1.6, ...flow.net.map(Math.abs));
-  const bars = flow.net.map((v, i) => {
-    const h = (Math.abs(v) / max) * 46;
+  const max = Math.max(1.6, ...flow.home, ...flow.away);
+  const bar = (v, i, up) => {
+    const h = (v / max) * 46;
     if (h < 0.6) return '';
-    return `<rect class="${v > 0 ? 'h' : 'a'}" x="${i * 4 + 0.5}" y="${(v > 0 ? 50 - h : 50).toFixed(1)}" width="3" height="${h.toFixed(1)}" rx="0.8"/>`;
-  }).join('');
+    return `<rect class="${up ? 'h' : 'a'}" x="${i * 4 + 0.5}" y="${(up ? 50 - h : 50).toFixed(1)}" width="3" height="${h.toFixed(1)}" rx="0.8"/>`;
+  };
+  const bars = flow.home.map((v, i) => bar(v, i, true) + bar(flow.away[i], i, false)).join('');
   const at = (i) => `${((i / flow.slots) * 100).toFixed(2)}%`;
   const now = flow.now != null
     ? `<rect class="future" x="${flow.now * 4}" y="0" width="${W - flow.now * 4}" height="100"/><rect class="now" x="${flow.now * 4 - 0.75}" y="0" width="1.5" height="100"/>`

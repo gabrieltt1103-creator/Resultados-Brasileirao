@@ -58,3 +58,4 @@ const fem = (name) => FEMININE.test(name || '');
 export const o = (name) => `${fem(name) ? 'a' : 'o'} ${name}`;
 export const doo = (name) => `${fem(name) ? 'da' : 'do'} ${name}`;
 export const ao = (name) => `${fem(name) ? 'à' : 'ao'} ${name}`;
+export const pelo = (name) => `${fem(name) ? 'pela' : 'pelo'} ${name}`;

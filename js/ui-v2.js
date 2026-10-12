@@ -3,7 +3,7 @@
 // o número mostra e o que só se consulta de vez em quando fica recolhido. O que não muda (detalhe do
 // time, escolha do time, status dos dados, texto para compartilhar) vem direto de ui.js.
 export * from './ui.js';
-import { crest, flowChart, formDots, miniTable, pct, scorers } from './ui.js';
+import { crest, flowChart, formDots, miniTable, pct, scorers, secadorLine } from './ui.js';
 import { bucketLabels, flowNote, goalTimeNote, h2hSummary, homeAwayNote, howItWent, statsReading, storyTags, tableLine } from './insights.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, weekdayShort } from './util.js';
 
@@ -82,7 +82,7 @@ function ifWins(row, now) {
   return `Se vencer, ${row.pos < now ? 'sobe' : 'cai'} para ${row.pos}º`;
 }
 
-/** Jogo da rodada. ctx: {rank(id), delta(id), favorite, flash, story, note, scenarios(ev)} */
+/** Jogo da rodada. ctx: {rank(id), delta(id), favorite, flash, story, note, scenarios(ev), secador} */
 export function matchCard(ev, ctx) {
   const s = ev.status;
   const post = s.kind === 'post' && ev.home.score != null && ev.away.score != null;
@@ -116,12 +116,13 @@ export function matchCard(ev, ctx) {
   const foot = ctx.note || (ev.moved ? (post ? 'Jogo remarcado' : 'Remarcado') : '');
   const status = live ? s.note : post ? 'Encerrado' : s.kind === 'pre' ? `Começa às ${s.label}` : s.label;
   const fav = ev.home.id === ctx.favorite || ev.away.id === ctx.favorite;
-  return `<article class="v2-game is-${s.kind}${fav ? ' is-fav' : ''}" data-match="${esc(ev.id)}" tabindex="0" role="button"
+  return `<article class="v2-game is-${s.kind}${fav ? ' is-fav' : ''}${ctx.secador ? ` sec-${esc(ctx.secador.kind)}` : ''}" data-match="${esc(ev.id)}" tabindex="0" role="button"
     aria-label="${esc(`${ev.home.name} ${ev.home.score ?? ''} x ${ev.away.score ?? ''} ${ev.away.name}, ${status}. Toque para ver detalhes.`)}">
     ${live ? `<div class="v2-livehdr"><i></i>${esc(s.half ? 'Intervalo' : `Ao vivo · ${s.label}`)}</div>` : ''}
     <div class="v2-row">${side(ev.home, 'home')}${center}${side(ev.away, 'away')}</div>
     ${stakes}${who}
     ${tags.length || foot ? `<div class="v2-foot">${tags.map((t) => `<b class="v2-chip">${esc(t)}</b>`).join('')}${foot ? `<span>${esc(foot)}</span>` : ''}</div>` : ''}
+    ${secadorLine(ctx.secador)}
   </article>`;
 }
 

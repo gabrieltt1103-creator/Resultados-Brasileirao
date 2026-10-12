@@ -11,6 +11,14 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 - **Resumo da rodada** escrito automaticamente: troca de liderança, quem entra ou sai do G6 e do Z4, viradas, zebras, gols no fim, hat-tricks e goleadas. Antes da bola rolar vira uma prévia com o jogão e a briga contra a queda.
 - Aviso de **GOL** no topo da tela, placar piscando em amarelo, vibração no Android e som de torcida opcional (ícone de alto-falante). O autor do gol só aparece quando o lance já chegou da ESPN (antes disso o aviso diz só de quem foi o gol), e gol retirado do placar (anulado ou corrigido) também ganha aviso.
 - Botão para compartilhar os placares da rodada no WhatsApp ou onde quiser.
+- **Secador** (com um time escolhido, liga e desliga no cartão do topo): em cada jogo da rodada, contra quem torcer para o seu time se dar bem, e quem secar só pela rivalidade. Veja abaixo.
+
+**Secador**
+- O app descobre o que está em jogo para o seu time: título, vaga no G6 ou fugir do rebaixamento. Risco pequeno também conta: o 14º com 3% de chance de cair ainda olha para baixo. Quem não tem nada em jogo fica só com a rivalidade.
+- Para cada jogo da rodada, refaz o resto do campeonato 4.000 vezes com cada resultado (vitória do mandante, empate, vitória do visitante) usando os mesmos sorteios nos três, para a diferença vir só do jogo trocado. O jogo aparece quando a chance do seu time muda 1,5 ponto percentual ou mais entre o melhor e o pior resultado (com chance pequena, basta mudar um quarto dela). A frase mostra os dois números: "Chance de G6: 87% com vitória do Grêmio, 84% com a do Cruzeiro".
+- Selos: **Seque o Cruzeiro** (torça contra quem briga com você), **Torça pelo empate** (quando os dois brigam com você), **Seca em dobro** (secar o rival ainda ajuda), **Nariz tapado** (o melhor é o rival vencer; em verde-enjoo com um pregador de roupa e uma frase de consolo), **Clássico dos rivais** (dois rivais se enfrentam: empate) e **Seu jogo** (a chance em cada resultado do próprio jogo). O resto fica como "Tanto faz pra você".
+- Rivais de fábrica: os grandes do mesmo estado (os 4 do Rio, os 4 de São Paulo, Atlético e Cruzeiro, Grêmio e Internacional, Athletico e Coritiba, Bahia e Vitória...). Na página do seu time dá para ligar e desligar cada rival, inclusive times de outros estados.
+- Ao vivo, cada jogo diz se está dando certo e o cartão conta quantas secadas estão funcionando; nos encerrados, se deu certo. Vale para a rodada atual e as próximas, e não usa os placares do simulador.
 
 **Detalhe do jogo** (toque no cartão)
 - Lance a lance com gols e cartões, estatísticas (posse, finalizações, chutes no gol, escanteios, faltas…) e os últimos 5 jogos de cada time.
@@ -104,7 +112,8 @@ Não há build nem dependências: os módulos em `js/` rodam direto no navegador
 | `js/rounds.js` | Monta as rodadas completas (inclusive jogos remarcados) e numera cada uma |
 | `js/table.js` | Tabela ao vivo, conferência com a classificação oficial, zonas, últimos 5 jogos, cenários e distâncias |
 | `js/insights.js` | Histórias dos jogos, manchetes da rodada, impacto da simulação, números e as frases de resumo |
-| `js/sim.js`, `js/odds-worker.js` | Chances até o fim (Monte Carlo) e sorteio de placares |
+| `js/sim.js`, `js/odds-worker.js` | Chances até o fim (Monte Carlo), contas do secador e sorteio de placares |
+| `js/secador.js` | Secador: rivais por estado, objetivo do time, para quem torcer em cada jogo e as frases |
 | `js/fx.js` | Som de gol, vibração e confete |
 | `js/ui.js` | Monta o HTML de cada parte da tela (versão atual) |
 | `js/ui-v2.js`, `v2/` | Versão 2 do visual: o que muda em relação ao `ui.js`, a página e o CSS |

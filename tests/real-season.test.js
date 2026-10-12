@@ -5,7 +5,9 @@ import fs from 'node:fs';
 import { buildRounds, dropReplaced, pickDefault } from '../js/rounds.js';
 import { parseHeadToHead, parseSummaryPlays } from '../js/espn.js';
 import { flowNote, h2hSummary, liveClock, matchFlow } from '../js/insights.js';
-import { computeTable, reconcile } from '../js/table.js';
+import { computeTable, reconcile, zonesFor } from '../js/table.js';
+import { secador } from '../js/sim.js';
+import { objectiveFor, rivalsOf, verdict } from '../js/secador.js';
 
 const snap = JSON.parse(fs.readFileSync(new URL('./data/brasileirao-2026.json', import.meta.url)));
 const NOW = new Date('2026-10-12T02:00:00Z').getTime();
@@ -108,4 +110,46 @@ test('últimos confrontos entre os dois times', () => {
   assert.equal(h2hSummary(fla, { id: '819', name: 'Flamengo' }, { id: '2029', name: 'Palmeiras' }).total, 'Nos últimos 5 confrontos: 3 vitórias do Flamengo, 1 vitória do Palmeiras e 1 empate.');
   assert.equal(parseHeadToHead(confrontos['flamengo-palmeiras'], fla[0].id).length, 4);
   assert.equal(h2hSummary([], gre, cor), null);
+});
+
+test('secador com a temporada real: rodada 31 para três torcedores', () => {
+  const valid = dropReplaced(events);
+  const rounds = buildRounds(valid, { standings, fullSeason: true });
+  const table = computeTable({ standings, events: valid, round: rounds[pickDefault(rounds, NOW)], complete: true });
+  const zones = zonesFor(standings);
+  const r31 = rounds.find((r) => r.number === 31);
+  const fan = (name) => {
+    const t = table.rows.find((x) => x.name === name);
+    const res = secador({ finished: table.finished, events: valid, targets: r31.events.map((e) => e.id), teamId: t.id, zones, runs: 2000 });
+    const objective = objectiveFor(res.base, zones);
+    const rivals = rivalsOf(t, table.rows, {});
+    const odds = new Map(res.games.map((g) => [g.id, g]));
+    const at = (home) => {
+      const ev = r31.events.find((e) => e.home.name === home);
+      return verdict(ev, { team: t, rivals, objective, odds: odds.get(ev.id) });
+    };
+    return { res, objective, at };
+  };
+  // Athletico-PR (4º): briga pelo G6 e o melhor é o Coritiba, rival, vencer o Atlético-MG.
+  const cap = fan('Athletico-PR');
+  assert.equal(cap.objective, 'g');
+  assert.equal(cap.res.games.length, 10);
+  assert.equal(cap.at('Atlético-MG').kind, 'nose');
+  assert.equal(cap.at('Athletico-PR').kind, 'mine');
+  // Flamengo (líder): Athletico-PR x Palmeiras é o jogo que mais mexe no título.
+  const fla = fan('Flamengo');
+  assert.equal(fla.objective, 'title');
+  const v = fla.at('Athletico-PR');
+  assert.equal(v.kind, 'help');
+  assert.equal(v.cheer.name, 'Athletico-PR');
+  assert.ok(v.values[0] - v.values[2] > 0.15);
+  assert.equal(fla.at('São Paulo').kind, 'rival'); // São Paulo x Vasco: só pela rivalidade
+  // Vasco (14º): risco pequeno de cair ainda conta; torce pelo Cruzeiro contra o Grêmio (18º).
+  const vas = fan('Vasco');
+  assert.equal(vas.objective, 'z');
+  assert.ok(vas.res.base.z > 0.01 && vas.res.base.z < 0.1);
+  assert.equal(vas.at('Grêmio').cheer.name, 'Cruzeiro');
+  // Mesmos sorteios para os três resultados: jogo que não envolve ninguém perto não muda nada.
+  const flat = fla.res.games.find((g) => r31.events.find((e) => e.id === g.id).home.name === 'Remo');
+  assert.equal(new Set(flat.title).size, 1);
 });

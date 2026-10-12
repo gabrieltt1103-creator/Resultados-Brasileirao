@@ -2,7 +2,8 @@ import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchStory, roundStats, scoreChange, trends } from './insights.js';
-import { chances, matchPicks, model, suggestScore } from './sim.js';
+import { chances, matchPicks, model, secador, suggestScore } from './sim.js';
+import { objectiveFor, rivalsOf, sameState, secadorSummary, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import * as fx from './fx.js';
 import { HOUR, addDays, dayLabel, dm, doo, esc, fmtTime, o, sameDay, save, shortDay, store, ymd } from './util.js';
@@ -24,13 +25,16 @@ const ALERT_GAP_MS = 5 * 60e3;
 const CACHE_KEY = 'temporada:v1';
 const SIM_KEY = 'simulacao:v1';
 const ODDS_RUNS = 3000;
+const SECADOR_RUNS = 4000;
+const SECADOR_KEY = 'secador';
+const RIVALS_KEY = 'rivais:v1';
 
 const $ = (id) => document.getElementById(id);
 const el = {
   season: $('season'), refresh: $('refresh'), pulse: $('pulse'), updated: $('updated'), sound: $('sound'),
   prev: $('prev'), next: $('next'), roundName: $('round-name'), roundDates: $('round-dates'),
   tabs: [...document.querySelectorAll('.tab')], views: [...document.querySelectorAll('[role="tabpanel"]')],
-  fav: $('fav'), favHint: $('fav-hint'), others: $('others'), news: $('news'), summary: $('summary'), matches: $('matches'), share: $('share'),
+  fav: $('fav'), secador: $('secador'), favHint: $('fav-hint'), others: $('others'), news: $('news'), summary: $('summary'), matches: $('matches'), share: $('share'),
   tableNote: $('table-note'), tableWrap: $('table-wrap'), legend: $('legend'), tableCheck: $('table-check'), stats: $('stats'), sim: $('sim'),
   error: $('error'), errorText: $('error-text'), retry: $('retry'), diag: $('diag'),
   sheet: $('sheet'), sheetBody: $('sheet-body'), sheetBack: $('sheet-back'), toasts: $('toasts'),
@@ -81,6 +85,10 @@ const state = {
   timer: 0,
   favorite: store('meu-time', null),
   hintOff: store('dica-time', false) === true,
+  secadorOn: store(SECADOR_KEY, false) === true,
+  rivals: cleanRivals(store(RIVALS_KEY, {})),
+  secador: null,          // contas do secador: {round, teamId, base, games}
+  secadorSig: '',
   sheet: null,
   sheetStack: [],
   selectedBar: null,
@@ -93,6 +101,15 @@ function cleanSims(raw) {
   const out = {};
   if (raw && typeof raw === 'object') {
     for (const [id, v] of Object.entries(raw)) if (Number.isInteger(v?.h) && Number.isInteger(v?.a)) out[id] = { h: v.h, a: v.a };
+  }
+  return out;
+}
+
+// Rivais escolhidos por time: {idDoTime: [ids]}.
+function cleanRivals(raw) {
+  const out = {};
+  if (raw && typeof raw === 'object') {
+    for (const [id, list] of Object.entries(raw)) if (Array.isArray(list)) out[id] = list.filter((x) => typeof x === 'string');
   }
   return out;
 }
@@ -383,24 +400,30 @@ try {
   worker.onerror = () => { worker = null; pendingOdds.forEach((done) => done(undefined)); pendingOdds.clear(); };
 } catch { worker = null; }
 
+// A data entra como número: o modelo ordena os jogos por ela para achar a fase recente de cada time.
 const compactEvent = (e) => ({
   id: e.id,
+  date: e.date.getTime(),
   home: { id: e.home.id, score: e.home.score },
   away: { id: e.away.id, score: e.away.score },
   status: { kind: e.status.kind, label: e.status.label, half: !!e.status.half },
 });
 
-function runOdds(finished, events, overrides) {
-  const input = { finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS };
-  const local = () => {
-    const out = chances({ ...input, finished });
-    return out ? { byId: [...out.byId], runs: out.runs, left: out.left } : null;
-  };
+// Manda a conta para o worker; sem worker (ou se ele falhar), faz aqui mesmo.
+function inWorker(input, local) {
   if (!worker) return Promise.resolve(local());
   return new Promise((resolve) => {
     const id = ++workerSeq;
     pendingOdds.set(id, (result) => resolve(result === undefined ? local() : result));
     worker.postMessage({ id, ...input });
+  });
+}
+
+function runOdds(finished, events, overrides) {
+  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS };
+  return inWorker(input, () => {
+    const out = chances({ ...input, finished });
+    return out ? { byId: [...out.byId], runs: out.runs, left: out.left } : null;
   });
 }
 
@@ -440,6 +463,63 @@ function scheduleOdds(delay = 30) {
   }, delay);
 }
 
+// Secador: contas da rodada vista para o time do torcedor (só a rodada atual e as próximas).
+let secadorToken = 0;
+function scheduleSecador() {
+  const t = state.table;
+  const r = state.rounds[state.roundIdx];
+  if (!state.secadorOn || !state.favorite || !t || t.mode !== 'jogos' || !r || state.roundIdx < state.focusIdx) return;
+  const list = eventList();
+  const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
+  const done = list.filter((e) => e.status.kind === 'post').length;
+  const sig = `${r.number}|${state.favorite}|${done}|${live}|${state.zones.g}|${state.zones.zStart}`;
+  if (sig === state.secadorSig) return;
+  state.secadorSig = sig;
+  const token = ++secadorToken;
+  const round = r.number;
+  const teamId = state.favorite;
+  const input = {
+    kind: 'secador', finished: [...t.finished.values()], events: list.map(compactEvent), zones: { g: state.zones.g, zStart: state.zones.zStart },
+    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamId, runs: SECADOR_RUNS,
+  };
+  const local = () => secador({ ...input, finished: t.finished });
+  // Um worker antigo (do cache do navegador) responderia com as chances: confere o formato.
+  inWorker(input, local)
+    .then((res) => (res === null || (res?.base && Array.isArray(res.games)) ? res : local()))
+    .then((res) => {
+      if (token !== secadorToken) return;
+      // Sem as contas (temporada que não fecha), fica só a rivalidade.
+      state.secador = res ? { ...res, round, teamId } : { round, teamId, base: null, games: [], failed: true };
+      safe('os jogos', renderGames, el.matches);
+    })
+    .catch((err) => { state.diag.errors.push({ part: 'secador', error: errText(err), t: Date.now() }); });
+}
+
+// O que o secador mostra na rodada r: o cartão e a linha de cada jogo.
+function secadorView(r) {
+  const teams = allTeams();
+  const team = teams.find((t) => t.id === state.favorite);
+  if (!team) return null;
+  if (!state.secadorOn) return { on: false, team };
+  const rivals = rivalsOf(team, teams, state.rivals);
+  const rivalNames = teams.filter((t) => rivals.has(t.id)).map((t) => t.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  if (state.roundIdx < state.focusIdx) return { on: true, team, rivals: rivalNames, past: true };
+  const got = state.secador?.round === r.number && state.secador.teamId === team.id ? state.secador : null;
+  const res = got?.failed ? null : got;
+  const objective = res ? objectiveFor(res.base, state.zones) : null;
+  const odds = new Map((res?.games || []).map((g) => [g.id, g]));
+  const verdicts = r.events.map((ev) => ({ ev, v: verdict(ev, { team, rivals, objective, odds: odds.get(ev.id) }) }));
+  const ready = state.table?.mode === 'jogos' && !got?.failed;
+  const summary = secadorSummary({ team, objective, base: res?.base || null, verdicts, zones: state.zones, ready });
+  const lines = new Map();
+  for (const { ev, v } of verdicts) {
+    // Enquanto as contas não chegam, só o que não depende delas: o jogo do time e os rivais.
+    if (!v || (!res && !['mine', 'rival', 'derby'].includes(v.kind))) continue;
+    lines.set(ev.id, { kind: v.kind, good: v.state === 'ok', ...verdictText(ev, v, { objective, zones: state.zones }) });
+  }
+  return { on: true, team, rivals: rivalNames, summary, lines };
+}
+
 // ---------- tela ----------
 // Cada parte é desenhada isolada: se uma falhar, as outras continuam.
 function safe(part, fn, container) {
@@ -457,6 +537,7 @@ function refresh() {
 }
 
 function render() {
+  safe('o secador', scheduleSecador);
   safe('o topo', renderHeader);
   safe('os jogos', renderGames, el.matches);
   safe('a tabela', renderTable, el.tableWrap);
@@ -521,6 +602,7 @@ function renderGames() {
     el.share.hidden = true;
     el.news.innerHTML = '';
     el.fav.innerHTML = '';
+    if (el.secador) el.secador.innerHTML = '';
     el.favHint.innerHTML = '';
     el.others.innerHTML = '';
     if (state.failed) el.matches.innerHTML = '';
@@ -534,6 +616,11 @@ function renderGames() {
     el.fav.innerHTML = state.favorite ? favoriteHtml() : '';
     el.favHint.innerHTML = state.favorite || state.hintOff || !state.events.size ? '' : ui.favoriteHint();
   }, el.fav);
+  let sec = null;
+  safe('o secador', () => {
+    sec = state.favorite ? secadorView(r) : null;
+    if (el.secador) el.secador.innerHTML = sec ? ui.secadorCard(sec) : '';
+  }, el.secador);
   safe('o resumo', () => {
     const news = headlines({ round: r, table: state.table, zones: state.zones, focus: isFocus, now });
     const started = r.events.some((e) => e.status.kind === 'post' || e.status.kind === 'live');
@@ -557,7 +644,7 @@ function renderGames() {
     scenarios: isFocus && state.table ? (ev) => { try { return scenarios(state.ctx, ev); } catch { return null; } } : null,
   };
   // Zebra compara com a tabela de agora, então só vale na rodada em andamento.
-  const card = (ev, note) => ui.matchCard(ev, { ...ctxBase, flash: takeFlash(ev.id), story: matchStory(ev, isFocus ? preRank : null), note });
+  const card = (ev, note) => ui.matchCard(ev, { ...ctxBase, flash: takeFlash(ev.id), story: matchStory(ev, isFocus ? preRank : null), note, secador: note ? null : sec?.lines?.get(ev.id) || null });
 
   // Jogos de hoje que são de outras rodadas (remarcados), para não passarem despercebidos.
   const others = isFocus ? sortEvents(eventList()).filter((e) => !r.events.includes(e)
@@ -760,6 +847,7 @@ function renderSheet() {
       form: state.formById.get(spec.id) || formOf(list, spec.id), upcoming, favorite: state.favorite,
       odds: state.oddsBase?.byId.get(spec.id) || null,
       rankOf: liveRank, roundOf: (e) => state.roundOf.get(e.id),
+      rivals: spec.id === state.favorite ? rivalsPanel(team) : null, open: state.open,
     });
   } else if (spec.type === 'picker') {
     html = ui.teamPicker(allTeams(), state.favorite);
@@ -772,6 +860,27 @@ function renderSheet() {
     });
   }
   el.sheetBody.innerHTML = html;
+}
+
+// Rivais do time escolhido, para a página do time: os do mesmo estado e os outros.
+function rivalsPanel(team) {
+  const teams = allTeams();
+  const same = sameState(team, teams);
+  const ids = new Set(same.map((t) => t.id));
+  const others = teams.filter((t) => t.id !== team.id && !ids.has(t.id)).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  return { on: rivalsOf(team, teams, state.rivals), same, others, secadorOn: state.secadorOn };
+}
+
+function toggleRival(id) {
+  const teams = allTeams();
+  const team = teams.find((t) => t.id === state.favorite);
+  if (!team || id === team.id) return;
+  const set = rivalsOf(team, teams, state.rivals);
+  if (set.has(id)) set.delete(id); else set.add(id);
+  state.rivals = { ...state.rivals, [team.id]: [...set] };
+  save(RIVALS_KEY, state.rivals);
+  safe('o detalhe', renderSheet, el.sheetBody);
+  safe('os jogos', renderGames, el.matches);
 }
 
 // ---------- avisos ----------
@@ -894,6 +1003,13 @@ function handleAction(btn) {
     safe('os números', renderStats, el.stats);
   } else if (action === 'diag') {
     openSheet({ type: 'diag' });
+  } else if (action === 'secador') {
+    state.secadorOn = !state.secadorOn;
+    save(SECADOR_KEY, state.secadorOn);
+    safe('o secador', scheduleSecador);
+    safe('os jogos', renderGames, el.matches);
+  } else if (action === 'rival' && id) {
+    toggleRival(id);
   }
 }
 

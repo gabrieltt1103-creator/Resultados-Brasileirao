@@ -159,11 +159,11 @@ function remaining(ev) {
 }
 
 /**
- * Chances de cada time terminar em cada faixa da tabela.
- * finished: Map id -> linha com todos os jogos encerrados (precisa da temporada completa).
+ * Ponto de partida das simulações: a tabela com os jogos encerrados e os fixados pelo usuário, os
+ * jogos ao vivo (com o que falta sortear) e todo confronto que ainda não aconteceu.
  * Devolve null quando não dá para saber quais jogos faltam.
  */
-export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7 }) {
+function prepare({ finished, events, overrides = {} }) {
   const rows = [...finished.values()];
   const n = rows.length;
   if (n < 4) return null;
@@ -194,7 +194,7 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
     if (ov) { fix(idx.get(e.home.id), idx.get(e.away.id), ov.h, ov.a); taken.add(key); } else if (e.status.kind === 'live' && e.home.score != null) {
       const [lh, la] = expectedGoals(m, e.home.id, e.away.id);
       const f = remaining(e);
-      live.push([idx.get(e.home.id), idx.get(e.away.id), e.home.score, e.away.score, lh * f, la * f]);
+      live.push([idx.get(e.home.id), idx.get(e.away.id), e.home.score, e.away.score, lh * f, la * f, e.id]);
       taken.add(key);
     }
   }
@@ -219,6 +219,18 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
   }
   for (const [h, a] of left) { count[h]++; count[a]++; }
   if (count.some((c) => c !== perTeam)) return null;
+  return { rows, n, idx, pts, w, gd, gf, live, left };
+}
+
+/**
+ * Chances de cada time terminar em cada faixa da tabela.
+ * finished: Map id -> linha com todos os jogos encerrados (precisa da temporada completa).
+ * Devolve null quando não dá para saber quais jogos faltam.
+ */
+export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7 }) {
+  const prep = prepare({ finished, events, overrides });
+  if (!prep) return null;
+  const { rows, n, pts, w, gd, gf, live, left } = prep;
 
   const rand = rng(seed);
   const posCount = new Uint32Array(n * n);
@@ -253,4 +265,98 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
     out.set(r.id, { title: at(1), g, z, pts: ptsSum[i] / runs });
   });
   return { byId: out, runs, left: left.length + live.length };
+}
+
+// Resultado testado em cada jogo do secador: vitória do mandante, empate, vitória do visitante.
+// Quando o placar sorteado já é desse resultado, fica ele; senão, o placar mais comum do resultado.
+const OUTCOMES = [(h, a) => (h > a ? [h, a] : [1, 0]), (h, a) => (h === a ? [h, a] : [1, 1]), (h, a) => (h < a ? [h, a] : [0, 1])];
+
+/**
+ * Secador: para cada jogo escolhido, a chance do time terminar campeão, no G e no Z com cada
+ * resultado (vitória do mandante, empate, vitória do visitante), sem os placares simulados pelo usuário.
+ * Os três resultados são testados no mesmo sorteio do resto do campeonato (números aleatórios
+ * comuns): a diferença entre eles vem só do jogo trocado, sem o ruído de sorteios diferentes.
+ * Jogo já encerrado também entra: troca o placar real pelo resultado testado.
+ * Devolve {runs, base: {title, g, z}, games: [{id, title: [m, e, v], g: [...], z: [...]}]} ou null.
+ */
+export function secador({ finished, events, targets, teamId, zones, runs = 4000, seed = 11 }) {
+  const prep = prepare({ finished, events });
+  if (!prep || !prep.idx.has(teamId)) return null;
+  const { rows, n, idx, pts, w, gd, gf, live, left } = prep;
+  const me = idx.get(teamId);
+  const byId = new Map(events.map((e) => [e.id, e]));
+  const leftAt = new Map(left.map((g, k) => [`${g[0]}|${g[1]}`, k]));
+  const liveAt = new Map(live.map((g, k) => [g[6], k]));
+  const tg = [];
+  for (const id of targets) {
+    const e = byId.get(id);
+    if (!e || !idx.has(e.home.id) || !idx.has(e.away.id)) continue;
+    const h = idx.get(e.home.id);
+    const a = idx.get(e.away.id);
+    if (e.status.kind === 'post') {
+      if (e.home.score != null && e.away.score != null) tg.push({ id, h, a, done: [e.home.score, e.away.score] });
+    } else if (liveAt.has(id)) tg.push({ id, h, a, live: liveAt.get(id) });
+    else if (leftAt.has(`${h}|${a}`)) tg.push({ id, h, a, left: leftAt.get(`${h}|${a}`) });
+  }
+
+  const g = zones?.g || 0;
+  const zFrom = zones?.zStart ? zones.zStart - 1 : Infinity;
+  const rand = rng(seed);
+  const P = new Float64Array(n);
+  const W = new Float64Array(n);
+  const D = new Float64Array(n);
+  const F = new Float64Array(n);
+  const J = new Float64Array(n);
+  const liveRes = new Int32Array(live.length * 2);
+  const leftRes = new Int32Array(left.length * 2);
+  const base = [0, 0, 0];
+  const hit = new Uint32Array(tg.length * 9);
+  const add = (h, a, hs, as, s) => {
+    F[h] += s * hs; F[a] += s * as; D[h] += s * (hs - as); D[a] += s * (as - hs);
+    if (hs > as) { P[h] += 3 * s; W[h] += s; } else if (hs < as) { P[a] += 3 * s; W[a] += s; } else { P[h] += s; P[a] += s; }
+  };
+  // Posição do time (0 = líder), com os mesmos critérios de desempate de chances().
+  const rank = () => {
+    let r = 0;
+    for (let j = 0; j < n; j++) {
+      if (j === me) continue;
+      if (P[j] > P[me] || (P[j] === P[me] && (W[j] > W[me] || (W[j] === W[me] && (D[j] > D[me] || (D[j] === D[me] && (F[j] > F[me] || (F[j] === F[me] && J[j] > J[me])))))))) r++;
+    }
+    return r;
+  };
+  const tally = (r, out, at) => { if (r === 0) out[at]++; if (r < g) out[at + 1]++; if (r >= zFrom) out[at + 2]++; };
+  for (let s = 0; s < runs; s++) {
+    P.set(pts); W.set(w); D.set(gd); F.set(gf);
+    live.forEach(([h, a, hs, as, lh, la], k) => {
+      const x = hs + poisson(lh, rand);
+      const y = as + poisson(la, rand);
+      liveRes[2 * k] = x; liveRes[2 * k + 1] = y;
+      add(h, a, x, y, 1);
+    });
+    left.forEach(([h, a, lh, la], k) => {
+      const x = poisson(lh, rand);
+      const y = poisson(la, rand);
+      leftRes[2 * k] = x; leftRes[2 * k + 1] = y;
+      add(h, a, x, y, 1);
+    });
+    for (let i = 0; i < n; i++) J[i] = rand();
+    tally(rank(), base, 0);
+    tg.forEach((t, ti) => {
+      const [x, y] = t.done || (t.live != null ? [liveRes[2 * t.live], liveRes[2 * t.live + 1]] : [leftRes[2 * t.left], leftRes[2 * t.left + 1]]);
+      add(t.h, t.a, x, y, -1);
+      OUTCOMES.forEach((pick, o) => {
+        const [hs, as] = pick(x, y);
+        add(t.h, t.a, hs, as, 1);
+        tally(rank(), hit, ti * 9 + o * 3);
+        add(t.h, t.a, hs, as, -1);
+      });
+      add(t.h, t.a, x, y, 1);
+    });
+  }
+  const at = (ti, o, k) => hit[ti * 9 + o * 3 + k] / runs;
+  return {
+    runs,
+    base: { title: base[0] / runs, g: base[1] / runs, z: base[2] / runs },
+    games: tg.map((t, ti) => ({ id: t.id, title: [0, 1, 2].map((o) => at(ti, o, 0)), g: [0, 1, 2].map((o) => at(ti, o, 1)), z: [0, 1, 2].map((o) => at(ti, o, 2)) })),
+  };
 }

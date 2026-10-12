@@ -88,6 +88,7 @@ export function matchCard(ev, ctx) {
       <div class="status">${status}</div>
       <div class="teams">${row(ev.home, 'home')}${row(ev.away, 'away')}</div>
       <div class="match-foot">${left}${ctx.note ? `<span class="foot-note">${esc(ctx.note)}</span>` : ev.moved ? `<span class="foot-note">${ev.status.kind === 'post' ? 'Jogo remarcado' : 'Remarcado'}</span>` : ''}</div>
+      ${secadorLine(ctx.secador)}
     </article>`;
 }
 
@@ -179,6 +180,45 @@ export const favoriteHint = () => `
     <button type="button" data-action="picker">${star} Escolha seu time para acompanhar de perto</button>
     <button type="button" class="hint-close" data-action="hide-hint" aria-label="Dispensar">×</button>
   </div>`;
+
+// ---------- secador ----------
+
+const DRYER = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6.5A4.5 4.5 0 0 1 7.5 2H15a3 3 0 0 1 3 3v3a3 3 0 0 1-3 3h-2.2l-1.1 6.4a1.4 1.4 0 0 1-1.4 1.1H9a1.2 1.2 0 0 1-1.2-1.3l.5-6.2h-.8A4.5 4.5 0 0 1 3 6.5zm4.5-1.7a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z" fill="currentColor" fill-rule="evenodd"/><path d="M19.6 4.2h1.9M19.6 6.5h2.4M19.6 8.8h1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+// Pregador de roupa, para o nariz tapado.
+const PIN = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 2.5l3.2 9.2M16 2.5l-3.2 9.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M9.7 10.5h4.6a2.2 2.2 0 0 1 2.2 2.2v6.6a2.2 2.2 0 0 1-2.2 2.2H9.7a2.2 2.2 0 0 1-2.2-2.2v-6.6a2.2 2.2 0 0 1 2.2-2.2zm2.3 2.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z" fill="currentColor" fill-rule="evenodd"/></svg>';
+const SEC_ICON = { help: DRYER, rival: DRYER, double: DRYER + DRYER, nose: PIN };
+
+/**
+ * Linha do secador embaixo de um jogo. s: {kind, chip, text, state, good} (frases de verdictText em
+ * secador.js; good: o resultado de agora é o que o torcedor quer) ou null.
+ */
+export function secadorLine(s) {
+  if (!s) return '';
+  if (s.kind === 'none') return `<div class="sec-line none">${esc(s.text)}</div>`;
+  const state = s.state ? ` <em class="${s.good ? 'sec-ok' : 'sec-no'}">${s.good ? '✓' : '✗'} ${esc(s.state)}</em>` : '';
+  return `<div class="sec-line k-${esc(s.kind)}"><b class="sec-chip">${SEC_ICON[s.kind] || ''}${esc(s.chip)}</b>${s.text || state ? `<span>${esc(s.text)}${state}</span>` : ''}</div>`;
+}
+
+/**
+ * Cartão do secador no topo dos jogos.
+ * on: ligado; team: time do torcedor; summary: {head, sub, text}; rivals: nomes; past: rodada que já passou.
+ */
+export function secadorCard({ on, team, summary, rivals = [], past = false }) {
+  const toggle = `<button type="button" class="sec-toggle" role="switch" aria-checked="${on}" data-action="secador" aria-label="${on ? 'Desligar o secador' : 'Ligar o secador'}"><i></i></button>`;
+  const top = `<div class="sec-top"><span class="sec-title"><i class="sec-ico">${DRYER}</i>Secador</span>${toggle}</div>`;
+  if (!on) {
+    return `<section class="secador off">${top}
+      <p class="sec-text">Ligue para ver contra quem torcer em cada jogo da rodada para ${esc(o(team.name))} se dar bem, e quem secar só pela rivalidade.</p></section>`;
+  }
+  const names = rivals.length ? rivals.join(', ').replace(/, ([^,]*)$/, ' e $1') : 'nenhum';
+  const foot = `<button type="button" class="sec-rivals" data-team="${esc(team.id)}"><span>${rivals.length > 1 ? 'Rivais' : 'Rival'}: <b>${esc(names)}</b></span><u>${rivals.length ? 'editar' : 'escolher'}</u></button>`;
+  if (past) return `<section class="secador on">${top}<p class="sec-text">O secador olha para a rodada atual e as próximas. Use as setas no topo para voltar.</p>${foot}</section>`;
+  return `<section class="secador on">${top}
+    <div class="sec-who">${crest(team.logo, team.name, 24)}<span>${esc(summary.head)}${summary.sub ? `<small>${esc(summary.sub)}</small>` : ''}</span></div>
+    ${summary.text ? `<p class="sec-text">${esc(summary.text)}</p>` : ''}
+    ${foot}
+  </section>`;
+}
 
 /** Tabela de classificação. */
 export function standingsTable({ table, zones, formById, favorite }) {
@@ -505,7 +545,22 @@ export function matchSheet(ev, ctx) {
 }
 
 /** Detalhe de um time. */
-export function teamSheet({ team, row, table, zones, form, upcoming = [], favorite, odds, rankOf = () => null, roundOf = () => null }) {
+// Rivais do time escolhido, para o secador: os do mesmo estado à mostra, os outros recolhidos.
+function rivalsBlock(r, open) {
+  const chip = (t) => `<button type="button" class="rival-chip${r.on.has(t.id) ? ' on' : ''}" data-action="rival" data-id="${esc(t.id)}" aria-pressed="${r.on.has(t.id)}">${crest(t.logo, t.name, 18, 'mini')}<span>${esc(t.name)}</span></button>`;
+  const shown = [...r.same, ...r.others.filter((t) => r.on.has(t.id))];
+  const rest = r.others.filter((t) => !r.on.has(t.id));
+  const note = !r.secadorOn ? 'Ligue o Secador na aba Jogos para ver quando secar cada um.'
+    : !shown.length ? 'Nenhum time do mesmo estado na Série A. Escolha um rival em outros times.' : 'Toque para ligar ou desligar.';
+  return `<section class="sheet-block rivals">
+    <h3 class="sub-title">Rivais <small>para o Secador</small></h3>
+    ${shown.length ? `<div class="rival-chips">${shown.map(chip).join('')}</div>` : ''}
+    ${rest.length ? `<details class="rival-more" data-keep="rivais"${open ? ' open' : ''}><summary>Outros times</summary><div class="rival-chips">${rest.map(chip).join('')}</div></details>` : ''}
+    <p class="chart-note">${esc(note)}</p>
+  </section>`;
+}
+
+export function teamSheet({ team, row, table, zones, form, upcoming = [], favorite, odds, rankOf = () => null, roundOf = () => null, rivals = null, open = {} }) {
   const isFav = team.id === favorite;
   const zone = row ? zones.byPos[row.pos] : null;
   const pct = row?.gp ? Math.round((row.pts / (row.gp * 3)) * 100) : 0;
@@ -521,6 +576,7 @@ export function teamSheet({ team, row, table, zones, form, upcoming = [], favori
       </div>
     </div>
     <button type="button" class="follow${isFav ? ' on' : ''}" data-action="follow" data-id="${esc(team.id)}">${star} ${isFav ? 'Seguindo · toque para deixar de seguir' : 'Seguir este time'}</button>
+    ${isFav && rivals ? rivalsBlock(rivals, open.rivais) : ''}
     ${row ? `
     <div class="mini-tiles">
       ${[['J', row.gp], ['V', row.w], ['E', row.d], ['D', row.l], ['SG', row.gd > 0 ? `+${row.gd}` : row.gd], ['%', pct]].map(([l, v]) => `<div><span>${l}</span><b>${v}</b></div>`).join('')}

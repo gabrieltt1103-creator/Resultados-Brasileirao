@@ -200,6 +200,36 @@ main { padding-top: 10px; }
 .v2-meta span:last-child { text-align: right; }
 .v2-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font: 500 12px/1.2 var(--body); color: var(--muted); }
 
+/* Secador: cartão escuro com o amarelo do secador; nos jogos, um selo e uma frase */
+.secador, .sec-line, .rivals { --sec: #f5c518; --sec-ink: #1d1600; --nose: #b8e07a; --nose-ink: #1f3a00; }
+.secador { --sec-bg: #121212; --sec-fg: #ffffff; --sec-soft: #cfcac0; --sec-rule: rgba(255, 255, 255, 0.15); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .secador { --sec-bg: #2a2925; --sec-fg: #f2f0eb; --sec-soft: #a39e94; --sec-rule: rgba(255, 255, 255, 0.1); }
+}
+:root[data-theme="dark"] .secador { --sec-bg: #2a2925; --sec-fg: #f2f0eb; --sec-soft: #a39e94; --sec-rule: rgba(255, 255, 255, 0.1); }
+.secador { gap: 10px; padding: 14px; border: 0; border-radius: 16px; background: var(--sec-bg); color: var(--sec-fg); }
+.secador.on { border: 0; }
+.secador.off { background: var(--surface); color: var(--ink); }
+.sec-title { font: 800 16px/1 var(--body); letter-spacing: 0; text-transform: none; }
+.sec-ico { width: 30px; height: 30px; }
+.secador.off .sec-toggle { background: var(--line); }
+.sec-who { font: 600 14px/1.3 var(--body); }
+.sec-who small { font: 500 12.5px/1.3 var(--body); color: var(--sec-soft); }
+.sec-text { font: 500 13.5px/1.4 var(--body); color: var(--sec-fg); opacity: 0.92; }
+.secador.off .sec-text { color: var(--muted); opacity: 1; }
+.sec-rivals { border-top-color: var(--sec-rule); color: var(--sec-soft); font: 500 13px/1.2 var(--body); padding-top: 10px; }
+.sec-rivals b { color: var(--sec-fg); }
+.sec-rivals u { color: var(--sec); font-weight: 700; }
+.v2-game .sec-line { padding: 0; margin-top: 9px; border: 0; font: 500 12.5px/1.35 var(--body); }
+.v2-game .sec-line.none { margin-top: 6px; font: 500 12px/1 var(--body); color: var(--muted); }
+.v2-game.sec-none.is-pre .v2-row { opacity: 0.55; }
+.v2-game .sec-chip { gap: 5px; margin-right: 7px; vertical-align: 0; padding: 4px 7px; border-radius: 6px; font: 800 10.5px/1 var(--body); font-stretch: 110%; letter-spacing: 0.05em; }
+.v2-game.sec-mine .sec-chip { background: var(--ink); color: var(--surface); }
+.v2-game .k-draw .sec-chip, .v2-game .k-derby .sec-chip, .v2-game .k-nodraw .sec-chip { background: var(--pill); box-shadow: none; }
+.v2-game .sec-line em { font-weight: 800; }
+.rival-chip { font: 600 13.5px/1 var(--body); padding: 6px 11px 6px 6px; }
+.rival-more summary { color: var(--ink); }
+
 /* Tabela */
 #view-tabela .table-wrap { background: var(--surface); border: 0; border-radius: 14px; }
 .v2-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-variant-numeric: tabular-nums; }

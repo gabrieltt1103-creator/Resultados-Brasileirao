@@ -437,6 +437,7 @@ const minLabel = (m) => (m.extra ? `${m.base}+${m.extra}'` : `${m.base}'`);
 const halfOf = (m) => (m.period ? m.period : (m.base ?? 0) > 45 ? 2 : 1);
 const minuteOf = (m) => (m.base ?? 0) + (m.extra || 0);
 const stoppage = (e) => e.half === 2 && (e.min.base ?? 0) >= 90 && e.min.extra > 0;
+const AFTER = ['', 'um minuto depois', 'dois minutos depois', 'três minutos depois'];
 const ORD = ['', 'primeiro', 'segundo', 'terceiro', 'quarto', 'quinto', 'sexto', 'sétimo', 'oitavo'];
 const NUM = ['', 'uma', 'duas', 'três', 'quatro', 'cinco'];
 // Depois de um gol anulado pelo VAR, o gol que valeu: "O empate veio pouco depois".
@@ -498,7 +499,8 @@ function overall(ev, stats, flow) {
     const strong = (m >= 2 * n && m - n >= 4) || (m - n >= 5 && Number.isFinite(pos) && pos >= 55);
     const edge = strong || m - n >= 3;
     const keeper = lead === 'home' ? a.saves : h.saves;
-    return { side: edge ? lead : null, strong, ratio: n ? m / n : 9, keeper: Number.isFinite(keeper) ? keeper : 0, known: true, busy: sh + sa >= 22, quiet: sh + sa < 22 };
+    const aim = (t) => (Number.isFinite(t.shotsOnTarget) && t.totalShots >= 3 ? t.shotsOnTarget / t.totalShots : 0);
+    return { side: edge ? lead : null, strong, ratio: n ? m / n : 9, keeper: Number.isFinite(keeper) ? keeper : 0, known: true, busy: sh + sa >= 22, quiet: sh + sa < 22, aim: { home: aim(h), away: aim(a) } };
   }
   const p = phase(flow, 0, flow ? (flow.now ?? flow.slots) : 0, 0.58);
   return { side: p === 'home' || p === 'away' ? p : null, strong: false, ratio: 0, keeper: 0, known: p != null, quiet: p === 'quiet' };
@@ -576,41 +578,60 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   const cur = { better: null, phase: null };
   const even = vary(ev.id, ['equilibrado', 'parelho', 'equilibrado', 'bem disputado']);
   const downSaid = {};
+  let b1 = null; // quem foi melhor no primeiro tempo (para comparar com o segundo)
   const paragraphs = [];
   for (const half of [1, 2]) {
     if (half === 2 && live && !inSecond) break;
     const current = live && (half === 2 ? inSecond : !inSecond && !ev.status.half);
     const p = half === 1 ? p1 : p2;
     const list = events.filter((x) => x.half === half);
-    const better = dominatedBoth ? p1 : p === 'home' || p === 'away' ? p : null;
+    // Quem foi melhor no tempo: pela pressão, mas o placar manda. Dois gols a mais no tempo não é jogo equilibrado.
+    const pressed = p === 'home' || p === 'away' ? p : null;
+    const scored = { home: 0, away: 0 };
+    for (const x of list) if (x.kind === 'goal') scored[x.side]++;
+    // ...nem quando o gol do tempo deixou o placar com dois de diferença.
+    const upTo = { home: 0, away: 0 };
+    for (const x of events) if (x.kind === 'goal' && x.half <= half) upTo[x.side]++;
+    const ahead2 = upTo.home - upTo.away >= 2 ? 'home' : upTo.away - upTo.home >= 2 ? 'away' : null;
+    const sharp = !p ? null : scored.home - scored.away >= 2 ? 'home' : scored.away - scored.home >= 2 ? 'away' : ahead2 && scored[ahead2] > scored[other(ahead2)] && pressed !== other(ahead2) ? ahead2 : null;
+    const better = dominatedBoth ? p1 : sharp || pressed;
     if (current) Object.assign(cur, { better, phase: p });
     // Frase de abertura: quem foi melhor no tempo. lead: o time de quem ela fala.
     let opener = '';
     let lead = null;
     let joinable = true; // aceita o primeiro lance emendado (": abriu o placar", ", mas o Y empatou")
     const ratio = (side) => (dom.side === side && dom.strong ? ratioWords(dom.ratio) : '');
-    if (half === 1) {
-      if (dominatedBoth) {
-        opener = `${Name(p1)} mandou no jogo do começo ao fim`;
-        if (ratio(p1)) opener += `, finalizando ${ratio(p1)} ${doo(T(other(p1)).name)}`;
-        lead = p1;
-      } else if (better) {
+    const inHalf = half === 1 ? (current ? ' até aqui' : ' no primeiro tempo') : ' no segundo tempo';
+    if (half === 1 && dominatedBoth) {
+      opener = `${Name(p1)} mandou no jogo do começo ao fim`;
+      if (ratio(p1)) { opener += `, finalizando ${ratio(p1)} ${doo(T(other(p1)).name)}`; joinable = false; }
+      lead = p1;
+    } else if (half === 2 && dominatedBoth) {
+      // O primeiro parágrafo já disse que um time mandou no jogo inteiro.
+    } else if (sharp && pressed === sharp) {
+      opener = half === 1 ? (current ? `${Name(sharp)} domina o jogo` : `${Name(sharp)} dominou o primeiro tempo`) : current ? `No segundo tempo, ${name(sharp)} domina` : `${Name(sharp)} dominou o segundo tempo`;
+      lead = sharp;
+    } else if (sharp) {
+      // Fez dois gols a mais sem ter mais o jogo: aproveitou as chances.
+      const word = scored[sharp] >= 3 ? (current ? 'é letal' : 'foi letal') : current ? 'é mais eficiente' : 'foi mais eficiente';
+      opener = pressed ? `${Name(pressed)} ${current ? 'tem' : 'teve'} mais volume${inHalf}, mas ${name(sharp)} ${word}` : `${Name(sharp)} ${word}${inHalf}`;
+      lead = sharp;
+    } else if (half === 1) {
+      if (better) {
         opener = current ? `${Name(better)} é melhor até aqui` : `${Name(better)} foi melhor no primeiro tempo`;
-        if (current && ratio(better)) opener += `, finalizando ${ratio(better)} ${doo(T(other(better)).name)}`;
+        if (current && ratio(better)) { opener += `, finalizando ${ratio(better)} ${doo(T(other(better)).name)}`; joinable = false; }
         lead = better;
       } else if (p === 'even') opener = current ? `Jogo ${even} até aqui` : `Primeiro tempo ${even}`;
       else if (p === 'quiet') opener = current ? 'Jogo truncado, de poucas chances até aqui' : 'Primeiro tempo truncado, de poucas chances';
-    } else if (!dominatedBoth) {
-      if (better) {
-        opener = p1 === better ? `${Name(better)} ${current ? 'segue' : 'seguiu'} melhor no segundo tempo` : `No segundo tempo, ${name(better)} ${p1 === other(better) ? 'voltou melhor' : 'cresceu'}`;
-        lead = better;
-      } else if (p === 'even' && (p1 === 'home' || p1 === 'away')) {
-        opener = `No segundo tempo, ${name(other(p1))} equilibrou`;
-        lead = other(p1);
-      } else if (p === 'even') opener = `O segundo tempo ${current ? 'segue' : 'seguiu'} ${even}`;
-      else if (p === 'quiet') opener = current ? 'O segundo tempo está morno' : 'O segundo tempo foi morno';
-    }
-    if (opener.includes(',') && !opener.startsWith('No segundo tempo,')) joinable = false;
+    } else if (better) {
+      opener = b1 === better ? `${Name(better)} ${current ? 'segue' : 'seguiu'} melhor no segundo tempo` : `No segundo tempo, ${name(better)} ${b1 === other(better) ? 'voltou melhor' : 'cresceu'}`;
+      lead = better;
+    } else if (p === 'even' && b1) {
+      opener = `No segundo tempo, ${name(other(b1))} equilibrou`;
+      lead = other(b1);
+    } else if (p === 'even') opener = `O segundo tempo ${current ? 'segue' : 'seguiu'} ${even}`;
+    else if (p === 'quiet') opener = current ? 'O segundo tempo está morno' : 'O segundo tempo foi morno';
+    if (half === 1) b1 = better;
     // Sem nenhum lance no tempo: o que faltou.
     if (opener && !list.length && !dominatedBoth) {
       const score = half === 1 && !current ? null : [hs, as];
@@ -642,7 +663,9 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
       const hasBut = out.length && out[out.length - 1].includes(', mas ');
       if (e.kind === 'goal') {
         const first = e.half === 1 && e.min.base === 1 && !e.min.extra;
-        const at = first ? 'logo no primeiro minuto' : `${(e.half === 1 ? e.verb === 'abriu o placar' && e.min.base <= 6 : e.min.base <= 47) ? 'logo aos' : 'aos'} ${min}`;
+        // Gol logo depois de outro: "fez o terceiro dois minutos depois".
+        const gap = prev?.kind === 'goal' && prev.half === e.half && !stoppage(e) ? minuteOf(e.min) - minuteOf(prev.min) : 0;
+        const at = AFTER[gap] || (first ? 'logo no primeiro minuto' : `${(e.half === 1 ? e.verb === 'abriu o placar' && e.min.base <= 6 : e.min.base <= 47) ? 'logo aos' : 'aos'} ${min}`);
         const tail = `${e.verb} ${at}${scorerOf(e)}`;
         const against = better && better !== e.side && ['abriu o placar', 'voltou à frente', 'virou'].includes(e.verb);
         // Gol de quem está com um a menos: dito uma vez.
@@ -715,7 +738,13 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
 
   // Fecho: ao vivo, como está agora; encerrado, o veredito.
   const ctx = { name, Name, other, last, reds, cur };
-  const close = live ? nowLine(ev, flow, plays, ctx) : verdict(ev, dom, events, ctx);
+  let close = live ? nowLine(ev, flow, plays, ctx) : verdict(ev, dom, events, ctx);
+  // Ao vivo, quem vence finalizando bem menos: o placar não conta o jogo todo.
+  const ahead = hs > as ? 'home' : as > hs ? 'away' : null;
+  if (live && ahead && dom.side === other(ahead) && dom.strong && !paragraphs.some((x) => x.includes('mais volume'))) {
+    const sharpWords = dom.aim?.[ahead] >= 0.6 ? 'acertou quase tudo o que chutou' : 'aproveitou melhor as chances';
+    close = `${Name(ahead)} finaliza bem menos, mas ${sharpWords}.${close ? ` ${close}` : ''}`;
+  }
   if (close) paragraphs.push(close);
   return paragraphs;
 }
@@ -765,6 +794,7 @@ function verdict(ev, dom, events, { name, Name, other }) {
   if (turn && turn.half === 2 && (turn.min.base ?? 0) >= 88) return 'Virada no apagar das luzes.';
   if (win && late && lastGoal.side === win && margin === 1) return 'Decidido no fim.';
   if (!win && late && lastGoal.verb === 'empatou') return lastGoal.down > 0 ? `Mesmo com um a menos, ${name(lastGoal.side)} buscou o empate no fim.` : `${Name(lastGoal.side)} buscou o empate no fim.`;
+  if (win && margin >= 3 && dom.side === other(win)) return `Goleada de quem chutou menos: ${name(win)} ${dom.aim?.[win] >= 0.6 ? 'acertou quase tudo o que chutou' : 'aproveitou cada chance'}.`;
   if (win && margin >= 3) return 'Goleada sem discussão.';
   if (turned) return dom.side === win ? 'Virada merecida.' : 'Uma virada e tanto.';
   const reason = (side) => {

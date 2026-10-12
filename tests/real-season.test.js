@@ -192,3 +192,21 @@ test('leitura de um jogo ao vivo com os dados reais da ESPN', () => {
     "O Coritiba abriu o placar aos 22', num gol contra de Marçal. O Botafogo chegou a marcar aos 26', com Danilo Santos, mas o VAR anulou. O empate veio pouco depois, aos 34', com o próprio Danilo Santos.");
   assert.deepEqual(matchReading(bare), ['Empate em 1 a 1.']);
 });
+
+// Chapecoense 0 x 3 Athletico-PR ao vivo (12/10/2026, 58'): placar, resumo e lance a lance reais da ESPN.
+const goleadaAoVivo = JSON.parse(fs.readFileSync(new URL('./data/chapecoense-athletico-ao-vivo.json', import.meta.url)));
+
+test('leitura ao vivo: 3 a 0 com pressão parecida não é "jogo equilibrado"', () => {
+  const ev = parseEvent(goleadaAoVivo.evento);
+  const plays = parseSummaryPlays(goleadaAoVivo.resumo);
+  const flow = matchFlow(plays, liveClock(ev));
+  const lines = matchReading(ev, { plays, stats: parseSummaryStats(goleadaAoVivo.resumo), flow });
+  assert.ok(lines.every((l) => !/equilibrad|parelho|disputado/.test(l)));
+  assert.deepEqual(lines, [
+    "O Athletico-PR foi letal no primeiro tempo: abriu o placar logo aos 6', com Leozinho. A Chapecoense acertou a trave. " +
+      "O Athletico-PR ampliou aos 29', com Luiz Gustavo, e fez o terceiro dois minutos depois, com Kevin Viveros.",
+    'No segundo tempo, a Chapecoense voltou melhor e acertou a trave.',
+    // A Chapecoense finalizou o dobro; o Athletico-PR acertou 5 dos 6 chutes.
+    'O Athletico-PR finaliza bem menos, mas acertou quase tudo o que chutou. A Chapecoense continua em cima, tentando diminuir.',
+  ]);
+});

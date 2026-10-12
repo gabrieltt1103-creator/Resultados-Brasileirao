@@ -546,6 +546,8 @@ test('leitura do jogo: contada em parágrafos, com os lances na ordem e o veredi
     'O Grêmio criou mais, mas o Internacional foi mais eficiente.');
   assert.equal(matchReading(game(0, 0, []), { stats: stats({ totalShots: 16, possessionPct: 62, saves: 1 }, { totalShots: 4, possessionPct: 38, saves: 2 }) }).at(-1),
     'Empate com gosto de derrota para o Grêmio, que criou mais, mas faltou pontaria.');
+  assert.equal(matchReading(game(0, 3, [goal('a', 6, 'Leo'), goal('a', 29, 'Luiz'), goal('a', 31, 'Kevin')]), { stats: stats({ totalShots: 12, shotsOnTarget: 3 }, { totalShots: 6, shotsOnTarget: 5 }) }).at(-1),
+    'Goleada de quem chutou menos: o Internacional acertou quase tudo o que chutou.');
   assert.equal(matchReading(game(1, 1, []), { stats: stats({ totalShots: 7 }, { totalShots: 8 }) }).at(-1), 'Empate justo.');
   assert.equal(matchReading(game(0, 0, []), { stats: stats({ totalShots: 13 }, { totalShots: 12 }) }).at(-1), 'Um 0 a 0 movimentado, que podia ter saído para qualquer lado.');
 

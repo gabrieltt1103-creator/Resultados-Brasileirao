@@ -17,8 +17,22 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://site.api.espn.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+  <link rel="preconnect" href="https://a.espncdn.com">
+  <!-- As fontes não seguram a primeira pintura: a página aparece com a fonte do sistema e troca quando chegam. -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap"></noscript>
   <link rel="stylesheet" href="style.css">
+  <!-- Todos os módulos baixam juntos, sem esperar um importar o outro. -->
+  <link rel="modulepreload" href="js/app.js">
+  <link rel="modulepreload" href="js/espn.js">
+  <link rel="modulepreload" href="js/rounds.js">
+  <link rel="modulepreload" href="js/table.js">
+  <link rel="modulepreload" href="js/insights.js">
+  <link rel="modulepreload" href="js/sim.js">
+  <link rel="modulepreload" href="js/season.js">
+  <link rel="modulepreload" href="js/fx.js">
+  <link rel="modulepreload" href="js/ui.js">
+  <link rel="modulepreload" href="js/util.js">
 </head>
 <body>
   <header class="band">
@@ -30,7 +44,7 @@
         </button>
         <button id="refresh" class="refresh" type="button" aria-label="Atualizar agora">
           <span id="pulse" class="pulse" hidden></span>
-          <span id="updated" class="updated">Carregando…</span>
+          <span id="updated" class="updated"><b>Carregando…</b></span>
           <svg class="refresh-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
@@ -64,6 +78,7 @@
       <div id="matches" class="matches">
         <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
       </div>
+      <div id="fav-hint"></div>
       <div class="share-row">
         <button id="share" class="share" type="button" hidden>
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4l4 4M5 13v6h14v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -75,6 +90,7 @@
       <p id="table-note" class="table-note"></p>
       <div id="table-wrap" class="table-wrap"></div>
       <ul id="legend" class="legend"></ul>
+      <div id="table-check"></div>
     </section>
     <section id="view-simular" data-tab="simular" role="tabpanel" aria-labelledby="tab-simular" hidden>
       <div id="sim" class="sim"></div>

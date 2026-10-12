@@ -44,8 +44,11 @@ function counted(ev, teamId, played, roundNumber, list) {
   return base >= roundNumber;
 }
 
-/** Tabela com todos os jogos encerrados. */
-export function finishedTable({ standings, events, round, complete }) {
+/**
+ * Tabela com todos os jogos encerrados.
+ * adjust: Map id -> pontos a somar (punição ou correção vista na classificação oficial; ver reconcile).
+ */
+export function finishedTable({ standings, events, round, complete, adjust }) {
   if (complete) {
     const rows = new Map(teamList(standings, events).map((t) => [t.id, blank(t)]));
     for (const ev of events) {
@@ -55,6 +58,7 @@ export function finishedTable({ standings, events, round, complete }) {
       if (h) apply(h, ev.home.score, ev.away.score);
       if (a) apply(a, ev.away.score, ev.home.score);
     }
+    for (const [id, pts] of adjust || []) if (rows.has(id)) rows.get(id).pts += pts;
     return { rows, mode: 'jogos' };
   }
   if (!standings?.length) return null;
@@ -72,12 +76,33 @@ export function finishedTable({ standings, events, round, complete }) {
 }
 
 /**
+ * Confere a tabela calculada pelos jogos (sem ajustes) com a classificação oficial da ESPN.
+ * Times com o mesmo número de jogos nas duas precisam ter os mesmos pontos; a diferença (punição
+ * no tribunal, placar corrigido) vira ajuste. Time com jogo a mais na conta do app (a ESPN ainda
+ * não contou o último resultado) mantém o ajuste anterior.
+ * Devolve {adjust, checked, ahead}: times conferidos e times à frente da classificação oficial.
+ */
+export function reconcile(rows, standings, previous = new Map()) {
+  const adjust = new Map(previous);
+  let checked = 0;
+  let ahead = 0;
+  for (const s of standings || []) {
+    const r = rows.get(s.id);
+    if (!r) continue;
+    if (r.gp !== s.gp) { if (r.gp > s.gp) ahead++; continue; }
+    checked++;
+    if (s.pts !== r.pts) adjust.set(s.id, s.pts - r.pts); else adjust.delete(s.id);
+  }
+  return { adjust, checked, ahead };
+}
+
+/**
  * Tabela antes da rodada, tabela "agora" (encerrados + ao vivo + simulações) e posições
  * só com os jogos encerrados.
  * overrides: {eventId: {h, a}} placares simulados (valem para jogos ainda não encerrados).
  */
-export function computeTable({ standings, events, round, complete, overrides = {} }) {
-  const base = finishedTable({ standings, events, round, complete });
+export function computeTable({ standings, events, round, complete, adjust, overrides = {} }) {
+  const base = finishedTable({ standings, events, round, complete, adjust });
   if (!base) return null;
   const list = sortEvents(events);
   const B = base.rows;

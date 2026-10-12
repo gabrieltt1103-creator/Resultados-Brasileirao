@@ -56,6 +56,28 @@ export function matchStory(ev, rankOf) {
   return s;
 }
 
+/**
+ * O que mudou no placar de um jogo que estava ao vivo (vale também para o gol no último lance antes
+ * do apito final). before: {h, a, kind} da leitura anterior.
+ * Devolve null, {sides: Set('home'|'away')} para gol ou {annulled: true} quando o placar desceu.
+ */
+export function scoreChange(before, ev) {
+  if (!before || before.kind !== 'live' || (ev.status.kind !== 'live' && ev.status.kind !== 'post')) return null;
+  const h = ev.home.score ?? 0;
+  const a = ev.away.score ?? 0;
+  if (h < before.h || a < before.a) return { annulled: true };
+  const sides = new Set();
+  if (h > before.h) sides.add('home');
+  if (a > before.a) sides.add('away');
+  return sides.size ? { sides } : null;
+}
+
+/** Lance do último gol do time, só se a ESPN já registrou todos os gols dele (senão seria o do gol anterior). */
+export function lastGoal(ev, team) {
+  const goals = ev.incidents.filter((i) => i.kind === 'goal' && i.team === team.id);
+  return goals.length && goals.length === (team.score ?? 0) ? goals[goals.length - 1] : null;
+}
+
 /** Etiquetas curtas para o cartão do jogo. */
 export function storyTags(s) {
   const tags = [];

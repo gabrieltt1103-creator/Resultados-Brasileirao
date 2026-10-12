@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseEvent, parseStandings, parseSummaryStats } from '../js/espn.js';
 import { buildRounds, pickDefault } from '../js/rounds.js';
-import { computeTable, distances, formOf, scenarios, zonesFor } from '../js/table.js';
-import { headlines, impactLines, matchStory, roundStats, trends } from '../js/insights.js';
+import { computeTable, distances, finishedTable, formOf, reconcile, scenarios, zonesFor } from '../js/table.js';
+import { headlines, impactLines, lastGoal, matchStory, roundStats, scoreChange, trends } from '../js/insights.js';
+import { deltaMonths, vanished } from '../js/season.js';
+import { statsView, tableCheck } from '../js/ui.js';
 import { chances, matchPicks, model, randomScore, rng, suggestScore } from '../js/sim.js';
 import { parseMinute } from '../js/util.js';
 import * as fx from './fixtures.js';
@@ -190,4 +192,64 @@ test('estatísticas do resumo do jogo', () => {
   const st = parseSummaryStats(fx.summary(live));
   assert.equal(Object.keys(st).length, 2);
   assert.ok(Object.values(st)[0].saves >= 2);
+});
+
+test('confere com a classificação oficial e aplica punição como ajuste', () => {
+  const fin = finishedTable({ standings, events, complete: true }).rows;
+  const ok = reconcile(fin, standings);
+  assert.equal(ok.checked, standings.length);
+  assert.equal(ok.adjust.size, 0);
+  // Time punido com perda de 3 pontos na classificação oficial.
+  const punished = standings[5];
+  const official = standings.map((t) => (t === punished ? { ...t, pts: t.pts - 3 } : t));
+  const check = reconcile(fin, official);
+  assert.deepEqual([...check.adjust], [[punished.id, -3]]);
+  const t = computeTable({ ...ctx, standings: official, adjust: check.adjust });
+  assert.equal(t.finished.get(punished.id).pts, punished.pts - 3);
+  // Depois de um jogo que a ESPN ainda não contou, o ajuste continua valendo.
+  const lagging = official.map((x) => (x.id === punished.id ? { ...x, gp: x.gp - 1, pts: x.pts - 3 } : x));
+  const later = reconcile(fin, lagging, check.adjust);
+  assert.equal(later.adjust.get(punished.id), -3);
+  assert.equal(later.ahead, 1);
+  assert.match(tableCheck({ mode: 'jogos', check, adjust: check.adjust, teams: t.byId, at: NOW }), /ajustados.*−3/);
+  assert.match(tableCheck({ mode: 'jogos', check: ok, adjust: ok.adjust, teams: t.byId, at: NOW }), /Confere com a classificação oficial/);
+});
+
+test('recarrega só os meses que ainda podem mudar', () => {
+  const now = new Date(2026, 9, 12, 14);
+  const list = [{ date: new Date(2026, 9, 18), status: { kind: 'pre' } }, { date: new Date(2026, 6, 1), status: { kind: 'post' } }];
+  assert.deepEqual(deltaMonths(list, new Date(2026, 9, 12, 2).getTime(), now), [10, 11, 12]);
+  // Leitura anterior no dia 1º: o dia de folga inclui setembro.
+  assert.deepEqual(deltaMonths(list, new Date(2026, 9, 1, 5).getTime(), now), [9, 10, 11, 12]);
+  // Jogo antigo ainda sem resultado puxa o mês dele.
+  const stuck = [...list, { date: new Date(2026, 7, 20), status: { kind: 'pre' } }];
+  assert.deepEqual(deltaMonths(stuck, new Date(2026, 9, 12, 2).getTime(), now), [8, 9, 10, 11, 12]);
+  // Some da lista o que a ESPN tirou dos meses recarregados, com folga no primeiro dia.
+  const evs = [
+    { id: 'a', date: new Date(2026, 9, 5) },
+    { id: 'b', date: new Date(2026, 9, 1, 0, 30) },
+    { id: 'c', date: new Date(2026, 8, 20) },
+    { id: 'd', date: new Date(2026, 10, 2) },
+  ];
+  assert.deepEqual(vanished(evs, new Set(['d']), [10, 11, 12], 2026), ['a']);
+  assert.deepEqual(vanished(evs, new Set(['d']), null, 2026), ['a', 'b', 'c']);
+});
+
+test('gol, gol anulado e autor do gol', () => {
+  const live = focus.events.find((e) => e.status.kind === 'live' && e.home.score > 0);
+  const before = { h: live.home.score - 1, a: live.away.score, kind: 'live' };
+  assert.deepEqual([...scoreChange(before, live).sides], ['home']);
+  assert.deepEqual(scoreChange({ h: live.home.score + 1, a: live.away.score, kind: 'live' }, live), { annulled: true });
+  assert.equal(scoreChange({ ...before, kind: 'pre' }, live), null);
+  // Gol no último lance: o jogo já aparece encerrado.
+  assert.ok(scoreChange(before, { ...live, status: { kind: 'post' } }).sides.has('home'));
+  // Lance do gol ainda não chegou: sem autor (não repete o do gol anterior).
+  assert.ok(lastGoal(live, live.home));
+  assert.equal(lastGoal(live, { ...live.home, score: live.home.score + 1 }), null);
+});
+
+test('média de gols da rodada comparada com a do campeonato', () => {
+  const st = roundStats(focus);
+  assert.match(statsView({ roundLabel: 'Rodada 30', st, trends: null, seasonAvg: st.avg + 0.6 }), /abaixo da média do campeonato/);
+  assert.match(statsView({ roundLabel: 'Rodada 30', st, trends: null, seasonAvg: st.avg }), /na média do campeonato/);
 });

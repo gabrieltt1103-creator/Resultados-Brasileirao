@@ -178,13 +178,36 @@ export function standingsTable({ table, zones, formById, favorite }) {
   };
 }
 
+/** Linha de conferência abaixo da tabela: bate com a classificação oficial? */
+export function tableCheck({ mode, check, adjust, teams, at }) {
+  if (mode === 'espn') return '<p class="table-check">Classificação oficial da ESPN somada aos jogos da rodada (a temporada não carregou inteira para o app calcular sozinho).</p>';
+  if (!check) return '';
+  const fixes = [...(adjust || [])].filter(([id]) => teams.has(id));
+  const time = at ? ` às ${fmtTime.format(at)}` : '';
+  if (fixes.length) {
+    const list = fixes.map(([id, pts]) => `${teams.get(id).name} ${pts > 0 ? '+' : '−'}${Math.abs(pts)}`).join(', ');
+    return `<p class="table-check warn">Pontos ajustados pela classificação oficial da ESPN (punição ou correção): ${esc(list)}.</p>`;
+  }
+  if (!check.checked) return '';
+  return `<p class="table-check ok"><b aria-hidden="true">✓</b> Confere com a classificação oficial da ESPN${esc(time)}${check.ahead ? ', que ainda não incluiu os últimos resultados' : ''}.</p>`;
+}
+
 /** Aba Números. */
-export function statsView({ roundLabel, st, trends, selectedBar }) {
+// Compara com a média de gols do campeonato até aqui (sem ela, usa faixas fixas).
+function avgNote(avg, season) {
+  if (season == null) return avg >= 2.8 ? 'rodada movimentada' : avg < 2 ? 'rodada travada' : 'dentro do normal';
+  const ref = `média do campeonato: ${decimal(season)}`;
+  if (avg - season >= 0.3) return `acima da ${ref}`;
+  if (season - avg >= 0.3) return `abaixo da ${ref}`;
+  return `na ${ref}`;
+}
+
+export function statsView({ roundLabel, st, trends, selectedBar, seasonAvg = null }) {
   const parts = [];
   if (st.games) {
     const tiles = [
       ['Gols', st.goals, st.live ? `em ${plural(st.games, 'jogo', 'jogos')}, ${st.live} ao vivo` : `em ${plural(st.games, 'jogo', 'jogos')}`],
-      ['Média por jogo', decimal(st.avg), st.avg >= 2.5 ? 'rodada movimentada' : st.avg < 2 ? 'rodada travada' : 'dentro da média'],
+      ['Média por jogo', decimal(st.avg), avgNote(st.avg, seasonAvg)],
       ['Empates', st.draws, st.zeroes ? `${plural(st.zeroes, 'foi', 'foram')} 0 x 0` : 'nenhum 0 x 0'],
       ['Vermelhos', st.reds, plural(st.yellows, 'amarelo', 'amarelos')],
     ];
@@ -587,17 +610,35 @@ function oddsTable(sim, odds, base, zones, favorite) {
     }).join('')}</tbody></table></div>`;
 }
 
+// Jogos encerrados não se simulam: uma linha cada, recolhidos.
+function doneList(events, open) {
+  if (!events.length) return '';
+  return `<details class="sim-done" data-keep="sim-done"${open ? ' open' : ''}>
+    <summary>${plural(events.length, 'jogo encerrado', 'jogos encerrados')} <small>entram com o resultado real</small></summary>
+    <ul>${events.map((e) => `<li data-match="${esc(e.id)}" role="button" tabindex="0">
+      <span class="sd-team">${esc(e.home.name)}</span><b>${e.home.score} x ${e.away.score}</b><span class="sd-team">${esc(e.away.name)}</span></li>`).join('')}
+    </ul>
+  </details>`;
+}
+
+const HOW = `<details class="how" data-keep="how-odds"%OPEN%>
+  <summary>Como calculamos</summary>
+  <p>Cada time tem uma força de ataque e uma de defesa, medidas pelos gols marcados e sofridos. A fase recente pesa mais: os últimos 5 jogos contam 40%, os últimos 10 contam 35% e o campeonato inteiro, 25%. Quem joga em casa ganha a vantagem que os mandantes têm tido neste Brasileirão.</p>
+  <p>Com essas forças, o app sorteia o placar de cada jogo que falta, refaz o campeonato 3.000 vezes e conta em quantas cada time termina campeão, no %G% ou no %Z%.</p>
+</details>`;
+
 /**
  * Aba Simular.
  * real: tabela atual (sem simulações); sim: tabela com as simulações; odds/oddsBase: chances com e sem simulações.
+ * open: blocos recolhíveis que o usuário deixou abertos.
  */
-export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished, picksOf = () => null }) {
+export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished, picksOf = () => null, open = {} }) {
   const count = round.events.filter((e) => sims[e.id]).length;
   const total = Object.keys(sims).length;
   const head = `
     <section class="block sim-head">
       <h2 class="section-title">Simulador · ${esc(roundLabel)}</h2>
-      <p class="chart-note">Escolha os placares dos jogos que faltam e veja a tabela e as chances mudarem na hora. Os botões mostram a chance de cada resultado e aplicam o placar mais provável dele. Jogos encerrados ficam com o resultado real. A simulação fica salva neste celular até você limpar.</p>
+      <p class="chart-note">Escolha os placares dos jogos que faltam e veja como a tabela e as chances mudam. Os botões mostram a chance de cada resultado. Fica salvo neste celular.</p>
       <div class="sim-actions">
         ${finished ? '' : '<button type="button" class="chip-btn" data-action="sim-suggest">Sugerir placares</button>'}
         <button type="button" class="chip-btn" data-action="sim-clear"${total ? '' : ' disabled'}>Limpar${total ? ` (${total})` : ''}</button>
@@ -606,18 +647,21 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
     </section>`;
   const games = finished
     ? `<p class="empty">Esta rodada já terminou. Use as setas no topo para ir a uma rodada que ainda vai acontecer.</p>`
-    : `<div class="sim-list">${round.events.map((e) => simCard(e, sims[e.id], picksOf(e))).join('')}</div>`;
+    : `<div class="sim-list">${round.events.filter((e) => e.status.kind !== 'post').map((e) => simCard(e, sims[e.id], picksOf(e))).join('')}</div>
+      ${doneList(round.events.filter((e) => e.status.kind === 'post'), open['sim-done'])}`;
   const impactHtml = sim && real ? `
     <section class="block">
       <h2 class="section-title">${total ? 'Com esses placares' : 'Tabela agora'}</h2>
       ${impact.length ? `<ul class="impact">${impact.map((n) => `<li><b class="tag tone-${n.tone}">${esc(n.tag)}</b><span>${esc(n.text)}</span></li>`).join('')}</ul>` : ''}
       <div class="table-wrap">${miniTable(sim, real, zones, favorite)}</div>
     </section>` : '';
+  const how = HOW.replace('%OPEN%', open['how-odds'] ? ' open' : '').replace('%G%', esc(zones.gLabel || 'G6')).replace('%Z%', esc(zones.zLabel || 'Z4'));
   const oddsHtml = `
     <section class="block">
       <h2 class="section-title">Chances até o fim</h2>
       ${odds ? oddsTable(sim || real, odds, total ? oddsBase : null, zones, favorite) : ''}
       <p class="chart-note">${esc(oddsNote)}</p>
+      ${odds ? how : ''}
     </section>`;
   return head + games + impactHtml + oddsHtml;
 }
@@ -629,20 +673,35 @@ const hhmm = (t) => (t ? fmtTime.format(new Date(t)) : '');
 export function diagSheet(d) {
   const row = (ok, label, text) => `<li class="diag-${ok === null ? 'wait' : ok ? 'ok' : 'bad'}"><b>${ok === null ? '…' : ok ? '✓' : '!'}</b><span><strong>${esc(label)}</strong><small>${esc(text)}</small></span></li>`;
   const s = d.season;
-  const seasonText = !s ? 'ainda não carregou'
-    : s.count ? `${s.count} jogos às ${hhmm(s.t)}${s.failed.length ? `; meses que falharam: ${s.failed.map((m) => MONTHS[m - 1]).join(', ')}` : ', todos os meses'}`
-      : `nenhum jogo veio na busca por mês${s.fallback != null ? `; usando a rodada atual (${s.fallback} jogos)` : ''}`;
+  const months = (list) => list.map((m) => MONTHS[m - 1]).join(', ');
+  let seasonText = 'ainda não carregou';
+  if (s?.error) seasonText = `falhou às ${hhmm(s.t)}: ${s.error}`;
+  else if (s && (s.count || !s.full)) {
+    const what = s.full ? 'temporada inteira' : `só os meses que ainda mudam (${months(s.months)})`;
+    seasonText = `${what}: ${s.count} jogos às ${hhmm(s.t)}${s.failed.length ? `; meses que falharam: ${months(s.failed)}` : ''}`;
+  } else if (s) seasonText = `nenhum jogo veio na busca${s.fallback != null ? `; usando a rodada atual (${s.fallback} jogos)` : ''}`;
   const st = d.standings;
+  const r = d.refresh;
+  const refreshText = !r ? 'aguardando'
+    : r.ok ? `ok às ${hhmm(r.t)}${r.errors?.length ? ` (${r.errors.length} de ${r.days} dias falharam: ${r.errors[0]})` : ''}`
+      : `falhou às ${hhmm(r.t)}: ${r.error}`;
+  const c = d.check;
+  const fixes = [...(d.adjust || [])];
+  const checkText = d.mode !== 'jogos' ? 'só com a tabela calculada pelos jogos'
+    : !c ? 'aguardando a classificação oficial'
+      : fixes.length ? `pontos ajustados em ${fixes.length} ${fixes.length === 1 ? 'time' : 'times'} (${fixes.map(([id, p]) => `${d.names.get(id) || id} ${p > 0 ? '+' : ''}${p}`).join(', ')})`
+        : `${c.checked} times conferidos, pontos iguais${c.ahead ? `; ${c.ahead} com jogo que a ESPN ainda não contou` : ''}`;
   const items = [
-    row(s ? s.count > 0 && !s.failed.length : null, 'Jogos da temporada', seasonText),
+    row(s ? !s.error && (s.count > 0 || !s.full) && !s.failed.length : null, 'Jogos da temporada', seasonText),
     row(st ? st.ok : null, 'Classificação oficial da ESPN', !st ? 'ainda não carregou' : st.ok ? `${st.count} times às ${hhmm(st.t)}` : `falhou às ${hhmm(st.t)}: ${st.error}`),
     row(d.mode ? true : d.season ? false : null, 'Tabela do app', d.mode === 'jogos' ? 'calculada a partir de todos os jogos (ao vivo e exata)' : d.mode === 'espn' ? 'classificação da ESPN corrigida com os jogos da rodada (faltam jogos da temporada para calcular sozinho)' : 'indisponível'),
+    row(d.mode === 'jogos' && c ? !fixes.length : null, 'Conferência com a classificação oficial', checkText),
     row(d.rounds ? d.roundsMethod === 'espelho' : null, 'Rodadas', !d.rounds ? 'ainda não montadas'
       : d.roundsMethod === 'espelho' ? `${d.rounds} montadas pelo espelho turno/returno, com os jogos remarcados na rodada certa; atual: ${d.focus}`
         : `${d.rounds} montadas pelas datas (${d.roundsWhy}); jogos remarcados podem ficar fora da rodada; atual: ${d.focus}`),
     row(d.mode === 'jogos' ? d.odds || null : false, 'Chances até o fim', d.mode !== 'jogos' ? 'precisa de todos os jogos da temporada' : d.odds ? 'calculadas' : 'calculando'),
     row(d.summary ? d.summary.ok : null, 'Estatísticas do jogo', !d.summary ? 'abra um jogo encerrado ou ao vivo para testar' : d.summary.ok ? `ok às ${hhmm(d.summary.t)}` : `falhou: ${d.summary.error}`),
-    row(d.refresh ? d.refresh.ok : null, 'Última atualização', !d.refresh ? 'aguardando' : d.refresh.ok ? `ok às ${hhmm(d.refresh.t)}` : `falhou às ${hhmm(d.refresh.t)}: ${d.refresh.error}`),
+    row(r ? r.ok && !r.errors?.length : null, 'Placar ao vivo (dia a dia)', refreshText),
   ];
   if (d.cache) items.push(row(true, 'Dados salvos no celular', `${d.cache.count} jogos salvos às ${hhmm(d.cache.t)}`));
   return `

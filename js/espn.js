@@ -6,21 +6,32 @@ export const SCOREBOARD = `${BASE}/site/v2/sports/soccer/bra.1/scoreboard`;
 export const STANDINGS = `${BASE}/v2/sports/soccer/bra.1/standings`;
 export const SUMMARY = `${BASE}/site/v2/sports/soccer/bra.1/summary`;
 
-export async function getJSON(url) {
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+// Sem resposta no prazo, a requisição é cancelada: uma chamada lenta da ESPN (já vimos 30 s)
+// não pode segurar o resto do app.
+export async function getJSON(url, timeout = 15e3) {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeout) : 0;
+  try {
+    const res = await fetch(url, { cache: 'no-store', signal: ctrl?.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    if (err?.name === 'AbortError') throw new Error(`sem resposta em ${Math.round(timeout / 1000)} s`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-export const fetchScoreboard = (range, limit = 300) => getJSON(range ? `${SCOREBOARD}?dates=${range}&limit=${limit}` : SCOREBOARD);
-export const fetchStandings = () => getJSON(STANDINGS);
+export const fetchScoreboard = (range, limit = 300, timeout) => getJSON(range ? `${SCOREBOARD}?dates=${range}&limit=${limit}` : SCOREBOARD, timeout);
+export const fetchStandings = () => getJSON(STANDINGS, 12e3);
 export const fetchSummary = (id) => getJSON(`${SUMMARY}?event=${encodeURIComponent(id)}`);
 
 const pad = (n) => String(n).padStart(2, '0');
 
 // A ESPN aceita no parâmetro dates um ano (2026), um mês (202610) ou um dia (20261011);
 // intervalos como 20261001-20261031 voltam com erro 400 no Brasileirão.
-export const fetchDay = (d) => fetchScoreboard(`${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`, 100);
+export const fetchDay = (d) => fetchScoreboard(`${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`, 100, 12e3);
 
 /**
  * Todos os jogos do ano numa chamada; se ela falhar, mês a mês em paralelo.
@@ -28,11 +39,15 @@ export const fetchDay = (d) => fetchScoreboard(`${d.getFullYear()}${pad(d.getMon
  */
 export async function fetchSeason(year) {
   try {
-    const json = await fetchScoreboard(String(year), 1000);
+    const json = await fetchScoreboard(String(year), 1000, 25e3);
     if (json?.events?.length) return { events: json.events, failed: [], season: json.leagues?.[0]?.season?.year || null };
   } catch { /* tenta por mês */ }
-  const months = Array.from({ length: 12 }, (_, i) => i + 1);
-  const results = await Promise.allSettled(months.map((m) => fetchScoreboard(`${year}${pad(m)}`, 200)));
+  return fetchMonths(year, Array.from({ length: 12 }, (_, i) => i + 1));
+}
+
+/** Só alguns meses do ano, em paralelo. Devolve {events, failed, season}. */
+export async function fetchMonths(year, months) {
+  const results = await Promise.allSettled(months.map((m) => fetchScoreboard(`${year}${pad(m)}`, 200, 20e3)));
   const byId = new Map();
   const failed = [];
   let season = null;

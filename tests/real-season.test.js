@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { buildRounds, dropReplaced, pickDefault } from '../js/rounds.js';
-import { computeTable } from '../js/table.js';
+import { computeTable, reconcile } from '../js/table.js';
 
 const snap = JSON.parse(fs.readFileSync(new URL('./data/brasileirao-2026.json', import.meta.url)));
 const NOW = new Date('2026-10-12T02:00:00Z').getTime();
@@ -47,4 +47,7 @@ test('a tabela calculada pelos jogos bate com a classificação oficial', () => 
     assert.equal(row.pts, s.pts, s.name);
     assert.equal(row.gp, s.gp, s.name);
   }
+  const check = reconcile(t.finished, standings);
+  assert.equal(check.checked, 20);
+  assert.equal(check.adjust.size, 0);
 });

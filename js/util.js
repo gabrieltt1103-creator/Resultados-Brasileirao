@@ -9,7 +9,6 @@ const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c]);
 
 export const fmtTime = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
-export const fmtClock = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const fmtWeekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' });
 const fmtWeekdayShort = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
 export const dm = (d) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;

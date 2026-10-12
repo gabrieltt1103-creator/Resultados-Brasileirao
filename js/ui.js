@@ -325,6 +325,23 @@ function stepper(ev, side, value) {
   </span>`;
 }
 
+function oddsBlock(ev, mp) {
+  if (!mp) return '';
+  const { home, draw, away } = mp.odds;
+  const seg = (cls, p) => (p >= 0.005 ? `<span class="seg ${cls}" style="flex:${p.toFixed(3)}"></span>` : '');
+  const s = mp.picks[mp.suggest];
+  return `<section class="sheet-block">
+    <h3 class="sub-title">Chances pelo modelo do app${ev.status.kind === 'live' ? ' <small>a partir do placar atual</small>' : ''}</h3>
+    <div class="stack" role="img" aria-label="${esc(`${ev.home.name} ${pctShort(home)}, empate ${pctShort(draw)}, ${ev.away.name} ${pctShort(away)}`)}">${seg('home', home)}${seg('draw', draw)}${seg('away', away)}</div>
+    <ul class="chart-legend">
+      <li><i class="sw home"></i>${esc(ev.home.name)} <b>${pctShort(home)}</b></li>
+      <li><i class="sw draw"></i>Empate <b>${pctShort(draw)}</b></li>
+      <li><i class="sw away"></i>${esc(ev.away.name)} <b>${pctShort(away)}</b></li>
+    </ul>
+    ${s ? `<p class="chart-note">Placar sugerido: <b>${esc(ev.home.name)} ${s.h} x ${s.a} ${esc(ev.away.name)}</b></p>` : ''}
+  </section>`;
+}
+
 function scenarioBlock(ev, sc) {
   if (!sc) return '';
   const rows = [
@@ -341,7 +358,7 @@ function scenarioBlock(ev, sc) {
   </section>`;
 }
 
-/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, now} */
+/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, picks, now} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
   const pre = s.kind === 'pre' || s.kind === 'off';
@@ -370,6 +387,7 @@ export function matchSheet(ev, ctx) {
     ${tags.length ? `<p class="tags center">${tags.map((t) => `<b class="tag tone-gol">${esc(t)}</b>`).join('')}</p>` : ''}
     ${ev.incidents.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev)}</section>` : ''}
     ${stats ? `<section class="sheet-block"><h3 class="sub-title">Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="chart-note center">Carregando estatísticas…</p>' : '')}
+    ${oddsBlock(ev, ctx.picks)}
     ${scenarioBlock(ev, ctx.scen)}
     ${s.kind !== 'post' ? `<button type="button" class="wide-btn" data-action="simulate" data-id="${esc(ev.id)}">Simular este jogo e ver a tabela</button>` : ''}
     <section class="sheet-block">
@@ -490,7 +508,9 @@ function oddsTiles(o, zones) {
 // Nome curto para os botões: a sigla da ESPN ou o próprio nome, se já for curto.
 const short = (t) => (t.name.length <= 9 ? t.name : t.abbr || t.name);
 
-function simCard(ev, sim) {
+const pctShort = (p) => (p < 0.01 ? '<1%' : `${Math.round(p * 100)}%`);
+
+function simCard(ev, sim, mp) {
   const s = ev.status;
   const final = s.kind === 'post';
   let status;
@@ -505,12 +525,19 @@ function simCard(ev, sim) {
       ${final ? `<b class="score">${side === 'h' ? ev.home.score : ev.away.score}</b>` : stepper(ev, side, value(side))}
     </div>`;
   const outcome = sim ? Math.sign(sim.h - sim.a) : null;
+  // Cada botão mostra a chance do resultado e aplica o placar mais provável dele.
+  const btn = (k, label, aria, fallback) => {
+    const pick = mp?.picks[k] || fallback;
+    const p = mp ? (k === 1 ? mp.odds.home : k === 0 ? mp.odds.draw : mp.odds.away) : null;
+    return `<button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="${pick.h}" data-a="${pick.a}" aria-pressed="${outcome === k}"
+      aria-label="${esc(`${aria}${p != null ? `, chance de ${pctShort(p)}` : ''}`)}"><span>${esc(label)}</span>${p != null ? `<small>${pctShort(p)}</small>` : ''}</button>`;
+  };
   const quick = final ? '' : `
     <div class="sim-quick" role="group" aria-label="Resultado rápido">
-      <button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="1" data-a="0" aria-pressed="${outcome === 1}" aria-label="${esc(`Vitória ${doo(ev.home.name)}`)}">${esc(short(ev.home))}</button>
-      <button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="1" data-a="1" aria-pressed="${outcome === 0}">Empate</button>
-      <button type="button" data-action="sim-set" data-id="${esc(ev.id)}" data-h="0" data-a="1" aria-pressed="${outcome === -1}" aria-label="${esc(`Vitória ${doo(ev.away.name)}`)}">${esc(short(ev.away))}</button>
-      ${sim ? `<button type="button" class="undo" data-action="sim-reset" data-id="${esc(ev.id)}" aria-label="Desfazer simulação">Desfazer</button>` : ''}
+      ${btn(1, short(ev.home), `Vitória ${doo(ev.home.name)}`, { h: 1, a: 0 })}
+      ${btn(0, 'Empate', 'Empate', { h: 1, a: 1 })}
+      ${btn(-1, short(ev.away), `Vitória ${doo(ev.away.name)}`, { h: 0, a: 1 })}
+      ${sim ? `<button type="button" class="undo" data-action="sim-reset" data-id="${esc(ev.id)}" aria-label="Desfazer a simulação deste jogo" title="Desfazer"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>` : ''}
     </div>`;
   return `
     <article class="sim-card is-${s.kind}${sim ? ' is-sim' : ''}" id="sim-${esc(ev.id)}">
@@ -564,22 +591,22 @@ function oddsTable(sim, odds, base, zones, favorite) {
  * Aba Simular.
  * real: tabela atual (sem simulações); sim: tabela com as simulações; odds/oddsBase: chances com e sem simulações.
  */
-export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished }) {
+export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished, picksOf = () => null }) {
   const count = round.events.filter((e) => sims[e.id]).length;
   const total = Object.keys(sims).length;
   const head = `
     <section class="block sim-head">
       <h2 class="section-title">Simulador · ${esc(roundLabel)}</h2>
-      <p class="chart-note">Escolha os placares dos jogos que faltam e veja a tabela e as chances mudarem na hora. Jogos encerrados ficam com o resultado real. A simulação fica salva neste celular até você limpar.</p>
+      <p class="chart-note">Escolha os placares dos jogos que faltam e veja a tabela e as chances mudarem na hora. Os botões mostram a chance de cada resultado e aplicam o placar mais provável dele. Jogos encerrados ficam com o resultado real. A simulação fica salva neste celular até você limpar.</p>
       <div class="sim-actions">
-        ${finished ? '' : '<button type="button" class="chip-btn" data-action="sim-random">Sortear placares</button>'}
+        ${finished ? '' : '<button type="button" class="chip-btn" data-action="sim-suggest">Sugerir placares</button>'}
         <button type="button" class="chip-btn" data-action="sim-clear"${total ? '' : ' disabled'}>Limpar${total ? ` (${total})` : ''}</button>
       </div>
       ${total > count ? `<p class="chart-note">${plural(total - count, 'jogo simulado', 'jogos simulados')} em outras rodadas também ${total - count === 1 ? 'entra' : 'entram'} na conta.</p>` : ''}
     </section>`;
   const games = finished
     ? `<p class="empty">Esta rodada já terminou. Use as setas no topo para ir a uma rodada que ainda vai acontecer.</p>`
-    : `<div class="sim-list">${round.events.map((e) => simCard(e, sims[e.id])).join('')}</div>`;
+    : `<div class="sim-list">${round.events.map((e) => simCard(e, sims[e.id], picksOf(e))).join('')}</div>`;
   const impactHtml = sim && real ? `
     <section class="block">
       <h2 class="section-title">${total ? 'Com esses placares' : 'Tabela agora'}</h2>

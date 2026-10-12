@@ -14,6 +14,7 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 
 **Detalhe do jogo** (toque no cartão)
 - Lance a lance com gols e cartões, estatísticas (posse, finalizações, chutes no gol, escanteios, faltas…) e os últimos 5 jogos de cada time.
+- **Chances pelo modelo**: vitória de cada time e empate, com o placar sugerido (num jogo ao vivo, a partir do placar atual).
 - **O que está em jogo**: em que posição cada time fica se vencer, empatar ou perder, considerando os outros placares do momento.
 
 **Tabela**
@@ -23,9 +24,15 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 - Toque num time para ver distância para o líder, para o G6 e para o Z4, os próximos 5 jogos (com rodada e posição de cada adversário) e os últimos resultados.
 
 **Simular**
-- Escolha placares para os jogos que faltam (com + e −, ou nos botões de vitória e empate) e veja a tabela mudar na hora, com quem sobe, quem cai e quem entra ou sai do G6 e do Z4.
-- **Chances até o fim**: título, G6 e Z4 para cada time, em 3.000 simulações do restante do campeonato com base nos gols marcados e sofridos e na vantagem de jogar em casa. As chances mudam com os placares que você escolher.
-- "Sortear placares" preenche a rodada com resultados prováveis. Dá para simular várias rodadas: tudo o que foi simulado entra na conta.
+- Escolha placares para os jogos que faltam (com + e −, ou nos botões de vitória e empate, que mostram a chance de cada resultado e aplicam o placar mais provável dele) e veja a tabela mudar na hora, com quem sobe, quem cai e quem entra ou sai do G6 e do Z4.
+- **Sugerir placares** preenche a rodada com a sugestão do modelo: o resultado mais provável (empate quando as chances dos dois times ficam a menos de 8 pontos) com o placar mais provável dentro dele. Dá para simular várias rodadas: tudo o que foi simulado entra na conta.
+- **Chances até o fim**: título, G6 e Z4 para cada time, em 3.000 simulações do restante do campeonato. As chances mudam com os placares que você escolher.
+
+**Como o modelo funciona**
+- Força de ataque e de defesa de cada time pelos gols marcados e sofridos, misturando três janelas: últimos 5 jogos (40%), últimos 10 (35%) e a temporada (25%). Cada janela recebe 8 jogos "fictícios" na média do campeonato, para poucos jogos não pesarem demais.
+- Vantagem de jogar em casa medida na própria temporada.
+- Gols esperados = média do campeonato × ataque × defesa do adversário × fator casa/fora; placares pela distribuição de Poisson.
+- Pesos escolhidos testando na temporada 2026: prevendo cada jogo só com os anteriores, a mistura errou menos que a média da temporada (log-loss 1,036 contra 1,042) e que só o mando de campo (1,061). A sugestão acertou o resultado em 48% dos jogos e o placar exato em 15%.
 
 **Números**
 - Gols da rodada, média por jogo, empates, cartões, quem venceu mais (mandante ou visitante), em que minutos saem os gols, artilheiros da rodada e maior goleada.

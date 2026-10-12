@@ -4,7 +4,7 @@ import { parseEvent, parseStandings, parseSummaryStats } from '../js/espn.js';
 import { buildRounds, pickDefault } from '../js/rounds.js';
 import { computeTable, distances, formOf, scenarios, zonesFor } from '../js/table.js';
 import { headlines, impactLines, matchStory, roundStats, trends } from '../js/insights.js';
-import { chances, model, randomScore, rng } from '../js/sim.js';
+import { chances, matchPicks, model, randomScore, rng, suggestScore } from '../js/sim.js';
 import { parseMinute } from '../js/util.js';
 import * as fx from './fixtures.js';
 
@@ -150,11 +150,39 @@ test('chances até o fim: somam certo e reagem à simulação', () => {
   assert.equal(chances({ finished: partial.finished, events: events.slice(-60), zones, runs: 10 }), null);
 });
 
-test('sorteio de placares usa o modelo', () => {
+test('sugestão de placar e chances de cada jogo', () => {
   const m = model(table.finished, events);
   const ev = focus.events.find((e) => e.status.kind === 'pre');
-  const s = randomScore(m, ev, rng(1));
-  assert.ok(Number.isInteger(s.h) && Number.isInteger(s.a));
+  const mp = matchPicks(m, ev);
+  assert.ok(Math.abs(mp.odds.home + mp.odds.draw + mp.odds.away - 1) < 1e-9);
+  const s = suggestScore(m, ev);
+  assert.equal(Math.sign(s.h - s.a), mp.suggest);
+  assert.deepEqual([s.h, s.a], [mp.picks[mp.suggest].h, mp.picks[mp.suggest].a]);
+  // Jogo ao vivo: parte do placar atual.
+  const live = focus.events.find((e) => e.status.kind === 'live' && e.away.score > e.home.score);
+  const lp = matchPicks(m, live);
+  assert.ok(lp.odds.away > lp.odds.home);
+  assert.ok(Object.values(lp.picks).every((p) => p.h >= live.home.score && p.a >= live.away.score));
+  const r = randomScore(m, ev, rng(1));
+  assert.ok(Number.isInteger(r.h) && Number.isInteger(r.a));
+});
+
+test('jogos recentes pesam mais que a temporada', () => {
+  // Mesmo time e mesma temporada, mas gols concentrados nos últimos jogos: o ataque fica mais forte.
+  const t = table.rows[10];
+  const mine = events.filter((e) => e.status.kind === 'post' && (e.home.id === t.id || e.away.id === t.id)).sort((x, y) => x.date - y.date);
+  const boosted = events.map((e) => {
+    if (!mine.slice(-5).includes(e)) return e;
+    const home = e.home.id === t.id;
+    return { ...e, home: { ...e.home, score: e.home.score + (home ? 3 : 0) }, away: { ...e.away, score: e.away.score + (home ? 0 : 3) } };
+  });
+  const early = events.map((e) => {
+    if (!mine.slice(0, 5).includes(e)) return e;
+    const home = e.home.id === t.id;
+    return { ...e, home: { ...e.home, score: e.home.score + (home ? 3 : 0) }, away: { ...e.away, score: e.away.score + (home ? 0 : 3) } };
+  });
+  const rows = (evs) => computeTable({ ...ctx, events: evs }).finished;
+  assert.ok(model(rows(boosted), boosted).att.get(t.id) > model(rows(early), early).att.get(t.id));
 });
 
 test('estatísticas do resumo do jogo', () => {

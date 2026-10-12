@@ -21,7 +21,16 @@ function poisson(lambda, rand) {
   return k - 1;
 }
 
-/** Força dos times a partir da tabela de jogos encerrados e dos placares em casa e fora. */
+// Peso de cada janela na força do time: últimos 5 jogos, últimos 10 e a temporada (0 = todos).
+// Escolhidos testando na temporada 2026: cada jogo previsto só com os jogos anteriores a ele.
+export const WEIGHTS = [[0.40, 5], [0.35, 10], [0.25, 0]];
+// Cada janela recebe K jogos "fictícios" na média, para poucos jogos não pesarem demais.
+const K = 8;
+
+/**
+ * Força de ataque e de defesa de cada time (1 = média do campeonato) e vantagem de jogar em casa.
+ * rows: tabela com todos os jogos encerrados (gp, gf, ga); events: jogos, para as janelas recentes.
+ */
 export function model(rows, events) {
   const list = [...rows.values()];
   const gp = list.reduce((s, r) => s + r.gp, 0);
@@ -30,19 +39,40 @@ export function model(rows, events) {
   let hg = 0;
   let ag = 0;
   let n = 0;
-  for (const e of events) {
-    if (e.status.kind !== 'post' || e.home.score == null) continue;
+  const recent = new Map();
+  const done = events.filter((e) => e.status.kind === 'post' && e.home.score != null).sort((x, y) => x.date - y.date);
+  for (const e of done) {
     hg += e.home.score;
     ag += e.away.score;
     n++;
+    for (const [id, gf, ga] of [[e.home.id, e.home.score, e.away.score], [e.away.id, e.away.score, e.home.score]]) {
+      if (!recent.has(id)) recent.set(id, []);
+      recent.get(id).push([gf, ga]);
+    }
   }
   const ratio = n >= 30 && ag > 0 ? Math.min(1.8, Math.max(1, hg / ag)) : 1.3;
-  const K = 6; // jogos "fictícios" na média, para não exagerar no começo do campeonato
+  const rate = (r, i) => {
+    let sum = 0;
+    for (const [w, k] of WEIGHTS) {
+      let total;
+      let games;
+      if (k) {
+        const last = (recent.get(r.id) || []).slice(-k);
+        total = last.reduce((s, g) => s + g[i], 0);
+        games = last.length;
+      } else {
+        total = i === 0 ? r.gf : r.ga;
+        games = r.gp;
+      }
+      sum += w * ((total + K * avg) / (games + K));
+    }
+    return sum / avg;
+  };
   const att = new Map();
   const def = new Map();
   for (const r of list) {
-    att.set(r.id, (r.gf + K * avg) / (r.gp + K) / avg);
-    def.set(r.id, (r.ga + K * avg) / (r.gp + K) / avg);
+    att.set(r.id, rate(r, 0));
+    def.set(r.id, rate(r, 1));
   }
   return { avg, home: Math.sqrt(ratio), away: 1 / Math.sqrt(ratio), att, def };
 }
@@ -54,7 +84,67 @@ export function expectedGoals(m, homeId, awayId) {
   ];
 }
 
-/** Placar sorteado para um jogo. */
+const FACT = [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800];
+const pmf = (l, k) => Math.exp(-l) * l ** k / FACT[k];
+
+/**
+ * Chances de vitória do mandante, empate e vitória do visitante, e a matriz de placares finais.
+ * Num jogo ao vivo, parte do placar atual e só considera os gols do tempo que falta.
+ */
+export function matchOdds(m, ev) {
+  let [lh, la] = expectedGoals(m, ev.home.id, ev.away.id);
+  let h0 = 0;
+  let a0 = 0;
+  if (ev.status.kind === 'live' && ev.home.score != null) {
+    const f = remaining(ev);
+    lh *= f;
+    la *= f;
+    h0 = ev.home.score;
+    a0 = ev.away.score;
+  }
+  const scores = [];
+  let home = 0;
+  let draw = 0;
+  let away = 0;
+  for (let i = 0; i <= 10; i++) {
+    for (let j = 0; j <= 10; j++) {
+      const p = pmf(lh, i) * pmf(la, j);
+      const h = h0 + i;
+      const a = a0 + j;
+      scores.push({ h, a, p });
+      if (h > a) home += p; else if (h === a) draw += p; else away += p;
+    }
+  }
+  const t = home + draw + away;
+  return { home: home / t, draw: draw / t, away: away / t, scores, expected: [h0 + lh, a0 + la] };
+}
+
+// Jogo equilibrado (diferença menor que isso entre as chances dos dois times) vira sugestão de empate.
+const DRAW_MARGIN = 0.08;
+
+/**
+ * Chances do jogo e o placar mais provável de cada resultado (1 = mandante, 0 = empate, -1 = visitante).
+ * suggest: o resultado sugerido, que é o mais provável, ou empate se o jogo é equilibrado.
+ */
+export function matchPicks(m, ev) {
+  const o = matchOdds(m, ev);
+  const picks = {};
+  for (const s of o.scores) {
+    const k = Math.sign(s.h - s.a);
+    if (!picks[k] || s.p > picks[k].p) picks[k] = s;
+  }
+  const suggest = Math.abs(o.home - o.away) < DRAW_MARGIN && picks[0] ? 0 : o.home > o.away ? 1 : -1;
+  return { odds: o, picks, suggest };
+}
+
+/** Placar sugerido: o resultado mais provável (empate se o jogo é equilibrado) com o placar mais provável dentro dele. */
+export function suggestScore(m, ev) {
+  const { picks, suggest } = matchPicks(m, ev);
+  const s = picks[suggest] || picks[1] || picks[-1];
+  return { h: s.h, a: s.a };
+}
+
+/** Placar sorteado para um jogo (usado nas simulações do campeonato). */
 export function randomScore(m, ev, rand = Math.random) {
   const [lh, la] = expectedGoals(m, ev.home.id, ev.away.id);
   return { h: poisson(lh, rand), a: poisson(la, rand) };

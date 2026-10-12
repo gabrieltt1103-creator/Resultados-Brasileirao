@@ -2,7 +2,7 @@ import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, matchStory, roundStats, trends } from './insights.js';
-import { chances, model, randomScore } from './sim.js';
+import { chances, matchPicks, model, suggestScore } from './sim.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
 import { HOUR, addDays, dayLabel, doo, esc, fmtClock, o, sameDay, save, shortDay, store, ymd } from './util.js';
@@ -521,7 +521,8 @@ function renderSim() {
   if (!state.table) oddsNote = 'As chances aparecem quando a classificação carregar.';
   else if (state.table.mode !== 'jogos') oddsNote = 'As chances precisam de todos os jogos da temporada, que não carregaram por completo. Toque em “Status dos dados” no rodapé para ver o motivo.';
   else if (!state.odds) oddsNote = 'Calculando as chances…';
-  else oddsNote = `${state.odds.runs.toLocaleString('pt-BR')} simulações dos ${state.odds.left} jogos que faltam, com base nos gols marcados e sofridos de cada time e na vantagem de jogar em casa. Os placares que você escolheu entram como resultado. É uma estimativa, não uma previsão.`;
+  else oddsNote = `${state.odds.runs.toLocaleString('pt-BR')} simulações dos ${state.odds.left} jogos que faltam. A força de cada time vem dos gols marcados e sofridos, com mais peso para os últimos 5 jogos (40%), depois os últimos 10 (35%) e a temporada (25%), mais a vantagem de jogar em casa. Os placares que você escolheu entram como resultado. É uma estimativa, não uma previsão.`;
+  const m = state.table ? currentModel() : null;
   el.sim.innerHTML = ui.simView({
     round: r,
     roundLabel: roundName(r),
@@ -535,7 +536,13 @@ function renderSim() {
     oddsNote,
     favorite: state.favorite,
     finished: isFinished(r),
+    picksOf: (e) => (m && e.status.kind !== 'post' ? matchPicks(m, e) : null),
   });
+}
+
+// Modelo de força dos times com os jogos encerrados até agora.
+function currentModel() {
+  return model(state.table?.finished || new Map(), eventList());
 }
 
 function renderStats() {
@@ -598,6 +605,7 @@ function renderSheet() {
       statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
       formById: state.formById, favorite: state.favorite, story: matchStory(ev, inFocus ? preRank : null),
       roundLabel: roundName(state.roundOf.get(ev.id)), now,
+      picks: state.table && (ev.status.kind === 'pre' || ev.status.kind === 'live') ? matchPicks(currentModel(), ev) : null,
     });
   } else if (spec.type === 'team') {
     const team = allTeams().find((t) => t.id === spec.id);
@@ -708,10 +716,10 @@ function handleAction(btn) {
   } else if (action === 'sim-clear') {
     state.sims = {};
     simChanged();
-  } else if (action === 'sim-random') {
+  } else if (action === 'sim-suggest') {
     const r = state.rounds[state.roundIdx];
-    const m = model(state.table?.finished || new Map(), eventList());
-    for (const e of r?.events || []) if (e.status.kind !== 'post') state.sims[e.id] = randomScore(m, e);
+    const m = currentModel();
+    for (const e of r?.events || []) if (e.status.kind !== 'post') state.sims[e.id] = suggestScore(m, e);
     simChanged();
   } else if (action === 'simulate' && ev) {
     closeSheet();

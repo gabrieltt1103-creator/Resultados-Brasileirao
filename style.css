@@ -975,7 +975,10 @@ main {
 .sim-quick button {
   flex: 1 1 0;
   min-width: 0;
-  padding: 6px 8px;
+  display: grid;
+  justify-items: center;
+  line-height: 1.15;
+  padding: 5px 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-2);
@@ -986,8 +989,10 @@ main {
   text-overflow: ellipsis;
   cursor: pointer;
 }
+.sim-quick button span, .sim-quick button small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.sim-quick button small { font-size: 11.5px; font-weight: 500; opacity: 0.8; }
 .sim-quick button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
-.sim-quick .undo { flex: 0 0 auto; background: none; color: var(--muted); }
+.sim-quick .undo { flex: 0 0 36px; place-items: center; background: none; color: var(--muted); }
 .impact { list-style: none; margin: 0; padding: 0; display: grid; }
 .impact li { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; font-size: 14.5px; }
 .impact li + li { border-top: 1px solid var(--line); }

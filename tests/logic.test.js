@@ -407,6 +407,11 @@ test('secador: resumo da rodada no cartão', () => {
     [game('Bahia', 'Flamengo'), [0.854, 0.878, 0.889]],
   ]) });
   assert.equal(sum.text, '1 de 2 secadas está dando certo. Falta 1 jogo.');
+  const one = (kind, hs, as) => secadorSummary({ team, objective: 'g', base, zones: zz, verdicts: list([[game('Grêmio', 'Cruzeiro', kind, hs, as), [0.889, 0.883, 0.864]]]) }).text;
+  assert.equal(one('post', 0, 1), 'A secada não deu certo.');
+  assert.equal(one('post', 2, 1), 'A secada deu certo.');
+  assert.equal(one('live', 0, 1), 'Nenhuma secada está dando certo por enquanto.');
+  assert.equal(one('live', 0, 0), 'A secada está dando certo.'); // o empate também serve: o que importa é o Cruzeiro não vencer
   sum = secadorSummary({ team: club('Red Bull Bragantino'), objective: null, base: { title: 0, g: 0, z: 0.003 }, zones: zz, verdicts: [] });
   assert.equal(sum.head, 'Nada em jogo para o Red Bull Bragantino na tabela');
   assert.equal(sum.text, 'Nenhum rival joga nesta rodada.');

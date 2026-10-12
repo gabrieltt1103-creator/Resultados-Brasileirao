@@ -268,10 +268,13 @@ export function secadorSummary({ team, objective, base, verdicts, zones, ready =
   let text;
   if (started.length) {
     const ok = started.filter((x) => x.v.state === 'ok').length;
+    const n = started.length;
     const live = started.some((x) => x.ev.status.kind === 'live');
-    const verb = live ? (ok === 1 ? 'está dando certo' : 'estão dando certo') : ok === 1 ? 'deu certo' : 'deram certo';
-    const pending = list.length - started.length;
-    text = `${ok} de ${started.length} ${started.length === 1 ? 'secada' : 'secadas'} ${verb}.${pending ? ` ${pending === 1 ? 'Falta 1 jogo' : `Faltam ${pending} jogos`}.` : ''}`;
+    const pending = list.length - n;
+    if (!ok) text = live ? 'Nenhuma secada está dando certo por enquanto.' : n === 1 ? 'A secada não deu certo.' : `Nenhuma das ${n} secadas deu certo.`;
+    else if (n === 1) text = live ? 'A secada está dando certo.' : 'A secada deu certo.';
+    else text = `${ok} de ${n} secadas ${live ? (ok === 1 ? 'está dando certo' : 'estão dando certo') : ok === 1 ? 'deu certo' : 'deram certo'}.`;
+    if (pending) text += ` ${pending === 1 ? 'Falta 1 jogo' : `Faltam ${pending} jogos`}.`;
   } else if (matter) {
     text = `${matter === 1 ? '1 jogo importa' : `${matter} jogos importam`} pra você nesta rodada.`;
     if (nose) text += nose === 1 ? (matter === 1 ? ' E é de nariz tapado.' : ' Um deles é de nariz tapado.') : ` ${nose} são de nariz tapado.`;

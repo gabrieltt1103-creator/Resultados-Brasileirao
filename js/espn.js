@@ -194,15 +194,34 @@ export function parseSummaryStats(json) {
   return out;
 }
 
-/**
- * Lance a lance do resumo do jogo, para o fluxo da partida: [{type, side, period, base, extra, x, t}].
- * side: 'home' ou 'away' (null em lances sem time, como o apito inicial); x: posição no campo no
- * sentido do ataque de quem fez o lance (0 = o próprio gol, 100 = o gol adversário).
- */
 // Ao vivo, a ESPN publica o chute mais recente como "temp-attempt" e só depois o reclassifica;
 // o texto já diz o que foi ("Attempt blocked.", "Attempt saved.", "Attempt missed.").
 const TEMP_ATTEMPT = [[/^attempt blocked/i, 'shot-blocked'], [/^attempt saved/i, 'shot-on-target'], [/(hits? the (bar|post|crossbar))|woodwork/i, 'shot-hit-woodwork'], [/^attempt missed/i, 'shot-off-target']];
 
+// Nome curto do jogador citado no texto do lance: "GOAL OVERTURNED BY VAR: Danilo Santos (Botafogo)..."
+// dá "Danilo Santos"; "Penalty saved. Paulinho (Palmeiras) right footed shot saved ... by Hugo Souza
+// (Corinthians)." dá o batedor, "Paulinho", e o goleiro, "Hugo Souza".
+const PENALTY = /^Penalty (?:saved|missed)[.!]\s*(?:Bad penalty by\s+)?([^():!.]+?)\s*\(/i;
+// Gols: "Goal! Coritiba 1, Botafogo 1. Danilo Santos (Botafogo) left footed shot..." e "Own Goal by Marçal, Botafogo."
+const SCORER = /^Goal![^.]*\.\s+([^().!]+?)\s*\(/i;
+const WHO_IN = {
+  'deleted-after-review': /:\s*([^():!]+?)\s*\(/, 'penalty---missed': PENALTY, 'penalty---saved': PENALTY,
+  goal: SCORER, 'goal---header': SCORER, 'goal---volley': SCORER, 'goal---free-kick': SCORER, 'penalty---scored': SCORER, 'own-goal': /^Own Goal by ([^,(]+?)\s*[,(]/i,
+};
+const KEEPER = /saved\b.*\bby\s+([^():!]+?)\s*\(/i;
+const shortName = (name) => {
+  if (!name || name.length <= 14) return name || '';
+  const parts = name.split(/\s+/);
+  return parts.length > 1 ? `${parts[0][0]}. ${parts[parts.length - 1]}` : name;
+};
+
+/**
+ * Lance a lance do resumo do jogo, para o fluxo e a leitura da partida:
+ * [{type, side, period, base, extra, x, t, who, keeper}].
+ * side: 'home' ou 'away' (null em lances sem time, como o apito inicial); x: posição no campo no
+ * sentido do ataque de quem fez o lance (0 = o próprio gol, 100 = o gol adversário); who: autor do gol
+ * (ou do gol contra), do gol anulado pelo VAR ou do pênalti perdido; keeper: goleiro que defendeu o pênalti.
+ */
 export function parseSummaryPlays(json) {
   const side = new Map();
   for (const c of json?.header?.competitions?.[0]?.competitors || []) if (c.team?.displayName) side.set(c.team.displayName, c.homeAway);
@@ -223,6 +242,8 @@ export function parseSummaryPlays(json) {
       extra: Number(m[2] || 0),
       x: Number.isFinite(p.fieldPositionX) ? p.fieldPositionX : null,
       t: x.time?.value ?? null,
+      who: WHO_IN[type] ? shortName(WHO_IN[type].exec(x.text || p.text || '')?.[1]) : '',
+      keeper: type === 'penalty---saved' ? shortName(KEEPER.exec(x.text || p.text || '')?.[1]) : '',
     });
   }
   return out;

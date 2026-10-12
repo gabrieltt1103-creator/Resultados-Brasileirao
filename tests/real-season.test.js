@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { buildRounds, dropReplaced, pickDefault } from '../js/rounds.js';
-import { parseHeadToHead, parseSummaryPlays } from '../js/espn.js';
-import { flowNote, h2hSummary, liveClock, matchFlow } from '../js/insights.js';
+import { parseEvent, parseHeadToHead, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
+import { h2hSummary, liveClock, matchFlow, matchReading } from '../js/insights.js';
 import { computeTable, reconcile, zonesFor } from '../js/table.js';
 import { secador } from '../js/sim.js';
 import { objectiveFor, pick, rivalsOf, stakeOf, verdict } from '../js/secador.js';
@@ -68,9 +68,13 @@ test('fluxo da partida pelo lance a lance', () => {
   assert.equal(f.half, 47);
   assert.equal(f.slots, 98);
   assert.deepEqual(f.goals, []);
-  const vasco = { name: 'Vasco' };
-  const remo = { name: 'Remo' };
-  assert.equal(flowNote(f, vasco, remo), "O Vasco pressionou mais. O melhor momento do Remo foi entre 73' e 81'.");
+  // Leitura do jogo sem as estatísticas: domínio e tempos pelo lance a lance.
+  const ev = { status: { kind: 'post' }, home: { id: 'v', name: 'Vasco', score: 0 }, away: { id: 'r', name: 'Remo', score: 0 }, incidents: [], goalsComplete: true };
+  assert.deepEqual(matchReading(ev, { plays, flow: f }), [
+    { label: 'Placar', text: 'Ficou no 0 a 0.' },
+    { label: 'Domínio', text: 'O Vasco pressionou mais.' },
+    { label: 'Os tempos', text: 'O Vasco foi melhor no 1º tempo; no 2º, o Remo equilibrou.' },
+  ]);
 
   // Gols no lugar certo (88', 90+1', 90+7'), inclusive nos 13 minutos de acréscimo do 2º tempo.
   const g = matchFlow(parseSummaryPlays(lances['atletico-santos']));
@@ -81,9 +85,11 @@ test('fluxo da partida pelo lance a lance', () => {
   const live = matchFlow(plays.filter((p) => p.period === 1 || p.base <= 67), liveClock({ status: { kind: 'live', label: "67'" } }));
   assert.equal(live.label(live.now - 1), "67'");
   assert.ok(live.net.slice(live.now).every((v) => v === 0));
-  assert.match(flowNote(live, vasco, remo, true), /até agora/);
+  const now = matchReading({ ...ev, status: { kind: 'live', label: "67'" } }, { flow: live }).find((l) => l.label === 'Agora');
+  assert.match(now.text, /^Nos últimos 10 minutos, /);
   const ht = matchFlow(plays.filter((p) => p.period === 1), liveClock({ status: { kind: 'live', label: 'INT', half: true } }));
   assert.equal(ht.now, ht.half);
+  assert.deepEqual(matchReading({ ...ev, status: { kind: 'live', label: 'INT', half: true } }, { flow: ht }).at(-1), { label: '1º tempo', text: 'O Vasco foi melhor no 1º tempo.' });
   // Poucos lances: sem gráfico.
   assert.equal(matchFlow(plays.slice(0, 8)), null);
 });
@@ -163,4 +169,24 @@ test('secador com a temporada real: rodada 31 para quatro torcedores', () => {
   // Mesmos sorteios para os três resultados: jogo que não envolve ninguém perto não muda nada.
   const flat = fla.res.games.find((g) => r31.events.find((e) => e.id === g.id).home.name === 'Remo');
   assert.equal(new Set(flat.title).size, 1);
+});
+
+// Coritiba x Botafogo ao vivo (12/10/2026, fim do 1º tempo): placar, resumo e lance a lance reais da ESPN.
+const aoVivo = JSON.parse(fs.readFileSync(new URL('./data/coritiba-botafogo-ao-vivo.json', import.meta.url)));
+
+test('leitura de um jogo ao vivo com os dados reais da ESPN', () => {
+  const ev = parseEvent(aoVivo.evento);
+  const plays = parseSummaryPlays(aoVivo.resumo);
+  const flow = matchFlow(plays, liveClock(ev));
+  assert.deepEqual(matchReading(ev, { plays, stats: parseSummaryStats(aoVivo.resumo), flow }), [
+    { label: 'Gols', text: "O Coritiba abriu o placar aos 22' (gol contra de F. Marçal) e o Botafogo empatou aos 34' (Danilo Santos)." },
+    { label: 'Destaques', text: "O Botafogo teve um gol de Danilo Santos anulado pelo VAR aos 26'." },
+    { label: 'Domínio', text: 'O Botafogo domina: 58% de posse e 10 finalizações contra 4 (3 a 1 no gol), mas o placar está empatado.' },
+    // Nos acréscimos do 1º tempo (45+2'), os últimos 10 minutos ainda são do 1º tempo.
+    { label: 'Agora', text: 'Nos últimos 10 minutos, o Botafogo pressiona: 3 finalizações e 1 escanteio.' },
+  ]);
+  // Placar ainda sem os autores dos gols: a história vem do lance a lance.
+  const bare = { ...ev, incidents: [], goalsComplete: false };
+  assert.equal(matchReading(bare, { plays }).at(0).text, "O Coritiba abriu o placar aos 22' (gol contra de Marçal) e o Botafogo empatou aos 34' (Danilo Santos).");
+  assert.equal(matchReading(bare).at(0).text, 'Empate em 1 a 1.');
 });

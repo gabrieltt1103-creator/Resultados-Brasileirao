@@ -1258,6 +1258,22 @@ details[open] > summary::before { transform: rotate(45deg); }
 }
 
 /* Fluxo da partida: barras de pressão por minuto, mandante para cima e visitante para baixo */
+/* Leitura do jogo: o assunto à esquerda (Gols, Destaques, Domínio, Agora), a frase à direita. */
+.reading { display: grid; gap: 8px; margin: 12px 0 0; }
+.reading div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.reading div + div { padding-top: 8px; border-top: 1px solid var(--line); }
+.reading dt {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.reading dd { margin: 0; font-size: 14px; line-height: 1.4; }
+@media (max-width: 379px) {
+  .reading div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
 .flow { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; }
 .flow-teams { display: grid; grid-template-rows: 1fr 1fr; place-items: center; height: 96px; }
 .flow-plot {

@@ -1,5 +1,5 @@
 // Montagem do HTML de cada parte da tela. Funções puras: recebem dados, devolvem texto.
-import { bucketLabels, flowNote, h2hSummary, storyTags } from './insights.js';
+import { bucketLabels, h2hSummary, storyTags } from './insights.js';
 import { distances, formPoints } from './table.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, shortDay, weekdayShort } from './util.js';
 
@@ -491,16 +491,24 @@ function h2hBlock(ev, games) {
   return `<section class="sheet-block"><h3 class="sub-title">Últimos confrontos</h3>${rows}<p class="chart-note">${esc(sum.note)}</p></section>`;
 }
 
-function flowBlock(ev, flow) {
-  const note = flowNote(flow, ev.home, ev.away, ev.status.kind === 'live');
+/** Leitura do jogo em linhas curtas, cada uma com o assunto à esquerda (Gols, Destaques, Domínio, Agora). */
+export function readingList(lines) {
+  if (!lines?.length) return '';
+  return `<dl class="reading">${lines.map((l) => `<div><dt>${esc(l.label)}</dt><dd>${esc(l.text)}</dd></div>`).join('')}</dl>`;
+}
+
+// Como está (ou como foi) o jogo: o fluxo da partida e a leitura logo abaixo.
+function readingBlock(ev, flow, lines) {
+  if (!flow && !lines?.length) return '';
+  const live = ev.status.kind === 'live';
   return `<section class="sheet-block">
-    <h3 class="sub-title">Fluxo da partida <small>chutes, escanteios e faltas perto da área</small></h3>
-    ${flowChart(flow, ev, note)}
-    ${note ? `<p class="chart-note">${esc(note)}</p>` : ''}
+    <h3 class="sub-title">${live ? 'Como está o jogo' : 'Como foi o jogo'}${flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>
+    ${flow ? flowChart(flow, ev, (lines || []).map((l) => l.text).join(' ')) : ''}
+    ${readingList(lines)}
   </section>`;
 }
 
-/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, picks, now} */
+/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, picks, now, flow, reading} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
   const pre = s.kind === 'pre' || s.kind === 'off';
@@ -527,8 +535,8 @@ export function matchSheet(ev, ctx) {
     </div>
     <p class="sh-meta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="tags center">${tags.map((t) => `<b class="tag tone-gol">${esc(t)}</b>`).join('')}</p>` : ''}
+    ${readingBlock(ev, ctx.flow, ctx.reading)}
     ${ev.incidents.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev)}</section>` : ''}
-    ${ctx.flow ? flowBlock(ev, ctx.flow) : ''}
     ${stats ? `<section class="sheet-block"><h3 class="sub-title">Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="chart-note center">Carregando estatísticas…</p>' : '')}
     ${oddsBlock(ev, ctx.picks)}
     ${scenarioBlock(ev, ctx.scen)}

@@ -315,58 +315,6 @@ export function goalTimeNote(st) {
   return `O período com mais gols foi entre ${from} e ${to} minutos: ${plural(b[i], 'gol', 'gols')}.`;
 }
 
-/** O que chama atenção nas estatísticas do jogo, numa frase. stats: {teamId: {totalShots, ...}} */
-export function statsReading(ev, stats) {
-  const h = stats?.[ev.home.id];
-  const a = stats?.[ev.away.id];
-  if (!h || !a) return '';
-  const lead = (k) => {
-    if (!Number.isFinite(h[k]) || !Number.isFinite(a[k]) || h[k] === a[k]) return null;
-    return h[k] > a[k] ? [ev.home, h[k], a[k]] : [ev.away, a[k], h[k]];
-  };
-  const clauses = [];
-  const shots = lead('totalShots');
-  if (shots && shots[1] - shots[2] >= 5) clauses.push([shots[0], `finalizou ${shots[1] >= 2 * shots[2] ? 'mais que o dobro' : 'mais'} (${shots[1]} a ${shots[2]})`]);
-  const pos = lead('possessionPct');
-  if (pos && pos[1] >= 60) clauses.push([pos[0], `teve ${Math.round(pos[1])}% de posse de bola`]);
-  const cor = lead('wonCorners');
-  if (cor && cor[1] - cor[2] >= 5) clauses.push([cor[0], `teve ${cor[1]} escanteios contra ${cor[2]}`]);
-  if (!clauses.length) {
-    if (Number.isFinite(h.totalShots) && Number.isFinite(a.totalShots)) return `Jogo equilibrado nas finalizações: ${h.totalShots} ${doo(ev.home.name)} e ${a.totalShots} ${doo(ev.away.name)}.`;
-    return '';
-  }
-  const [first, second] = clauses;
-  if (second && second[0] === first[0]) {
-    const rest = first[1].startsWith('teve ') && second[1].startsWith('teve ') ? second[1].slice(5) : second[1];
-    return `${cap(o(first[0].name))} ${first[1]} e ${rest}.`;
-  }
-  return [first, second].filter(Boolean).map(([t, text]) => `${cap(o(t.name))} ${text}.`).join(' ');
-}
-
-const COUNT = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete'];
-
-/** Como foi o jogo, em até duas frases, pelos gols. */
-export function howItWent(ev, story = matchStory(ev)) {
-  const goals = ev.incidents.filter((i) => i.kind === 'goal');
-  if (!ev.goalsComplete || !goals.length || (ev.status.kind !== 'post' && ev.status.kind !== 'live')) return '';
-  const out = [];
-  const first = Math.min(...goals.map((g) => g.min.base ?? 0));
-  if (goals.length >= 2 && first >= 75) out.push(`Os ${COUNT[goals.length] || goals.length} gols saíram depois dos ${first} minutos.`);
-  const lastGoal = goals[goals.length - 1];
-  if (story.virada) {
-    const { winner, loser } = story.virada;
-    const opened = goals[0].team === loser.id;
-    const extra = lastGoal.min.base >= 90 && lastGoal.min.extra > 0 && lastGoal.team === winner.id ? ' nos acréscimos' : '';
-    out.push(`${cap(o(loser.name))} ${opened ? 'abriu o placar' : 'chegou a estar na frente'} e ${o(winner.name)} virou${extra}.`);
-  } else if (story.late) {
-    const { who, min, team, effect } = story.late;
-    out.push(`${who || team.name} marcou aos ${min} e ${effect === 'empate' ? `garantiu o empate ${doo(team.name)}` : `deu a vitória ${ao(team.name)}`}.`);
-  } else if (goals.length === 1 && goals[0].who) {
-    out.push(`${goals[0].who} marcou o único gol${ev.status.kind === 'live' ? ' até agora' : ''}, aos ${goals[0].min.label}.`);
-  }
-  return out.slice(0, 2).join(' ');
-}
-
 /** O que o resultado faz com o time na tabela (tabela ao vivo da rodada em andamento). */
 export function tableLine(id, table, zones) {
   const r = table?.byId.get(id);
@@ -474,45 +422,245 @@ export function matchFlow(plays, now = null) {
     const m = i < half ? i + 1 : 46 + (i - half);
     return i < half ? (m <= 45 ? `${m}'` : `45+${m - 45}'`) : (m <= 90 ? `${m}'` : `90+${m - 90}'`);
   };
-  return { slots, half, net, goals, now: nowSlot, plays: used.length, label };
+  // Lances usados, com o minuto (posição no gráfico), para a leitura do jogo contar chutes e escanteios.
+  const list = used.map((p) => ({ type: p.type, side: p.side, w: p.w, i: slotOf(p) }));
+  return { slots, half, net, goals, now: nowSlot, plays: used.length, list, label };
 }
 
-/** Leitura do fluxo numa frase: quem pressionou mais e o melhor momento de cada time. */
-export function flowNote(flow, home, away, live = false) {
-  if (!flow) return '';
-  let pos = 0;
-  let neg = 0;
-  for (const v of flow.net) { if (v > 0) pos += v; else neg -= v; }
-  if (pos + neg < 2) return '';
-  // Janela de 10 minutos com mais pressão do time, apertada nos minutos em que ela aparece de fato.
-  const best = (sign) => {
-    let top = 0;
-    let start = -1;
-    for (let s = 0; s + 10 <= flow.slots; s++) {
-      let sum = 0;
-      for (let i = s; i < s + 10; i++) sum += Math.max(0, sign * flow.net[i]);
-      if (sum > top) { top = sum; start = s; }
+// ---------- leitura do jogo ----------
+
+const SHOT_TYPES = /^(goal|own-goal|penalty---|shot-|deleted-after-review)/;
+const list2 = (items) => (items.length > 1 ? `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}` : items[0] || '');
+
+// Autor do gol para a frase: "gol contra de Marçal", "Hulk, de pênalti", "Pedro".
+const goalWho = (g) => (g.og ? (g.who ? `gol contra de ${g.who}` : 'gol contra') : g.pen ? (g.who ? `${g.who}, de pênalti` : 'de pênalti') : g.who);
+
+/**
+ * Como o placar andou: "O Coritiba abriu o placar aos 22' (gol contra de Marçal) e o Botafogo empatou
+ * aos 34' (Danilo Santos)." Com 5 gols ou mais, resume pelo intervalo.
+ */
+function goalStory(ev, plays) {
+  const live = ev.status.kind === 'live';
+  const h = ev.home.score ?? 0;
+  const a = ev.away.score ?? 0;
+  let goals = ev.incidents.filter((i) => i.kind === 'goal');
+  let complete = ev.goalsComplete;
+  // O placar da ESPN às vezes chega sem os autores; o lance a lance tem os gols com minuto e autor.
+  if ((!complete || !goals.length) && plays?.length) {
+    const fromPlays = plays.filter((p) => FLOW_GOAL.test(p.type) && p.side).map((p) => ({
+      kind: 'goal', team: p.side === 'home' ? ev.home.id : ev.away.id, who: p.who || '', og: p.type === 'own-goal', pen: p.type === 'penalty---scored',
+      min: { base: p.base, extra: p.extra, label: p.extra ? `${p.base}+${p.extra}'` : `${p.base}'` },
+    }));
+    const count = (id) => fromPlays.filter((g) => g.team === id).length;
+    if (count(ev.home.id) === h && count(ev.away.id) === a) {
+      goals = fromPlays;
+      complete = true;
     }
-    if (start < 0 || top < 1.5) return null;
-    let a = start;
-    let b = start + 9;
-    const peak = Math.max(...flow.net.slice(a, b + 1).map((v) => sign * v));
-    while (a < b && sign * flow.net[a] < 0.2 * peak) a++;
-    while (b > a && sign * flow.net[b] < 0.2 * peak) b--;
-    return b - a <= 2 ? `por volta dos ${flow.label(a)}` : `entre ${flow.label(a)} e ${flow.label(b)}`;
-  };
-  const share = pos / (pos + neg);
-  const H = best(1);
-  const A = best(-1);
-  const yet = live ? ' até agora' : '';
-  if (share >= 0.62 || share <= 0.38) {
-    const [lead, other, otherBest] = share >= 0.62 ? [home, away, A] : [away, home, H];
-    return `${cap(o(lead.name))} pressionou mais${yet}. ${otherBest ? `O melhor momento ${doo(other.name)} foi ${otherBest}.` : `${cap(o(other.name))} quase não levou perigo.`}`;
   }
-  const parts = [`Jogo equilibrado${yet}.`];
-  if (H && A) parts.push(`O melhor momento ${doo(home.name)} foi ${H}; o ${doo(away.name)}, ${A}.`);
-  else if (H || A) parts.push(`O melhor momento ${doo((H ? home : away).name)} foi ${H || A}.`);
-  return parts.join(' ');
+  if (!h && !a) return live ? 'Ainda sem gols.' : 'Ficou no 0 a 0.';
+  const lead = h > a ? ev.home : a > h ? ev.away : null;
+  const plain = lead ? `${cap(o(lead.name))} ${live ? 'vence' : 'venceu'} por ${Math.max(h, a)} a ${Math.min(h, a)}.` : `${live ? 'Empate' : 'Terminou empatado'} em ${h} a ${a}.`;
+  if (!complete || !goals.length) return plain;
+  if (goals.length === 1 && !live) {
+    const g = goals[0];
+    const t = g.team === ev.home.id ? ev.home : ev.away;
+    return `${cap(o(t.name))} venceu com ${g.og ? `gol contra${g.who ? ` de ${g.who}` : ''}` : `gol${g.pen ? ' de pênalti' : ''}${g.who ? ` de ${g.who}` : ''}`} aos ${g.min.label}.`;
+  }
+  if (goals.length >= 5) {
+    // Muitos gols: pelo placar do intervalo e do fim, sem listar um por um.
+    const ht = goals.filter((g) => (g.min.base ?? 0) <= 45);
+    const hh = ht.filter((g) => g.team === ev.home.id).length;
+    const ha = ht.length - hh;
+    const htLead = hh > ha ? ev.home : ha > hh ? ev.away : null;
+    const end = lead ? `${Math.max(h, a)} a ${Math.min(h, a)}` : `${h} a ${a}`;
+    let text = `Jogo de ${goals.length} gols: `;
+    if (htLead && htLead === lead) text += `${o(htLead.name)} foi para o intervalo vencendo por ${Math.max(hh, ha)} a ${Math.min(hh, ha)} e ${live ? 'agora vence por' : 'fechou em'} ${end}`;
+    else if (htLead) text += `${o(htLead.name)} foi para o intervalo vencendo por ${Math.max(hh, ha)} a ${Math.min(hh, ha)}, mas ${lead ? `${o(lead.name)} ${live ? 'vira para' : 'virou para'} ${end}` : `${live ? 'está' : 'terminou'} ${end}`}`;
+    else text += `${hh} a ${ha} no intervalo e ${lead ? `${end} para ${o(lead.name)}` : end} ${live ? 'agora' : 'no fim'}`;
+    return `${text}.`;
+  }
+  // Placar a cada gol, do ponto de vista de quem marcou: abriu, ampliou, diminuiu, empatou, virou.
+  let sh = 0;
+  let sa = 0;
+  const last = {}; // último estado de cada time antes de empatar: 'led' ou 'trailed'
+  const clauses = [];
+  let prev = null;
+  for (const g of goals) {
+    const home = g.team === ev.home.id;
+    const t = home ? ev.home : ev.away;
+    const before = home ? sh - sa : sa - sh;
+    if (home) sh++; else sa++;
+    const after = home ? sh - sa : sa - sh;
+    let verb;
+    if (!clauses.length) verb = 'abriu o placar';
+    else if (before > 0) verb = 'ampliou';
+    else if (after < 0) verb = 'diminuiu';
+    else if (after === 0) verb = 'empatou';
+    else verb = last[t.id] === 'trailed' ? 'virou' : 'voltou à frente';
+    if (after > 0) last[t.id] = 'led';
+    if (after < 0) last[t.id] = 'trailed';
+    const other = home ? ev.away : ev.home;
+    if (after > 0) last[other.id] = 'trailed';
+    if (after < 0) last[other.id] = 'led';
+    const who = goalWho(g);
+    clauses.push(`${prev === t.id ? '' : `${clauses.length ? o(t.name) : cap(o(t.name))} `}${verb} aos ${g.min.label}${who ? ` (${who})` : ''}`);
+    prev = t.id;
+  }
+  return `${list2(clauses)}.`;
+}
+
+// Lances que mudaram o jogo sem virar gol: expulsão, gol anulado pelo VAR, pênalti perdido, bola na trave.
+function highlights(ev, plays, live) {
+  const team = (side) => (side === 'home' ? ev.home : ev.away);
+  const out = [];
+  for (const r of ev.incidents.filter((i) => i.kind === 'red')) {
+    const t = r.team === ev.home.id ? ev.home : ev.away;
+    out.push(`${cap(o(t.name))} ${live ? 'está' : 'ficou'} com um a menos desde os ${r.min.label}${r.who ? ` (${r.who} expulso)` : ''}.`);
+  }
+  for (const p of (plays || []).filter((x) => x.type === 'deleted-after-review' && x.side)) {
+    out.push(`${cap(o(team(p.side).name))} teve um gol${p.who ? ` de ${p.who}` : ''} anulado pelo VAR aos ${p.extra ? `${p.base}+${p.extra}` : p.base}'.`);
+  }
+  for (const p of (plays || []).filter((x) => /^penalty---(missed|saved)$/.test(x.type) && x.side)) {
+    out.push(`${p.who || cap(o(team(p.side).name))} perdeu um pênalti aos ${p.extra ? `${p.base}+${p.extra}` : p.base}'${p.keeper ? ` (defesa de ${p.keeper})` : ''}.`);
+  }
+  const wood = { home: 0, away: 0 };
+  for (const p of plays || []) if (p.type === 'shot-hit-woodwork' && p.side) wood[p.side]++;
+  for (const side of ['home', 'away']) {
+    if (wood[side]) out.push(`${cap(o(team(side).name))} acertou a trave${wood[side] > 1 ? ` ${wood[side]} vezes` : ''}.`);
+  }
+  return out.slice(0, 2).join(' ');
+}
+
+// Quem manda pelos números: posse, finalizações e chutes no gol, e se o placar acompanha.
+function dominance(ev, stats, flow, live) {
+  const h = stats?.[ev.home.id];
+  const a = stats?.[ev.away.id];
+  const hs = ev.home.score ?? 0;
+  const as = ev.away.score ?? 0;
+  const ok = (k) => Number.isFinite(h?.[k]) && Number.isFinite(a?.[k]);
+  if (ok('totalShots') && h.totalShots + a.totalShots >= 4) {
+    const pos = ok('possessionPct') ? [h.possessionPct, a.possessionPct] : null;
+    const shots = [h.totalShots, a.totalShots];
+    const on = ok('shotsOnTarget') ? [h.shotsOnTarget, a.shotsOnTarget] : null;
+    const lead = shots[0] > shots[1] ? 0 : shots[1] > shots[0] ? 1 : pos && Math.abs(pos[0] - pos[1]) >= 10 ? (pos[0] > pos[1] ? 0 : 1) : -1;
+    const big = lead >= 0 && (shots[lead] >= 2 * shots[1 - lead] && shots[lead] - shots[1 - lead] >= 4);
+    const edge = lead >= 0 && (shots[lead] - shots[1 - lead] >= 3 || (pos && pos[lead] >= 55));
+    const onText = on ? ` (${on[lead >= 0 ? lead : 0]} a ${on[lead >= 0 ? 1 - lead : 1]} no gol)` : '';
+    if (big || edge) {
+      const t = lead === 0 ? ev.home : ev.away;
+      const p = pos && pos[lead] >= 52 ? `${Math.round(pos[lead])}% de posse e ` : '';
+      let text = `${cap(o(t.name))} ${big ? 'domina' : 'tem mais o jogo'}: ${p}${shots[lead]} finalizações contra ${shots[1 - lead]}${onText}`;
+      if (!live) text = text.replace(' domina:', ' dominou:').replace(' tem mais o jogo:', ' teve mais o jogo:');
+      const mine = lead === 0 ? hs - as : as - hs;
+      if (mine < 0) text += `, mas quem ${live ? 'vence' : 'venceu'} é ${o((lead === 0 ? ev.away : ev.home).name)}`;
+      else if (mine === 0 && hs + as > 0) text += `, mas o placar ${live ? 'está' : 'ficou'} empatado`;
+      else if (mine === 0) text += `, mas ${live ? 'ainda não' : 'não'} conseguiu marcar`;
+      text += '.';
+      // Goleiro que segurou o resultado.
+      const keeper = lead === 0 ? a?.saves : h?.saves;
+      if (Number.isFinite(keeper) && keeper >= 4 && mine <= 0) text += ` O goleiro ${doo((lead === 0 ? ev.away : ev.home).name)} fez ${keeper} defesas.`;
+      return text;
+    }
+    return `Jogo equilibrado: ${shots[0]} finalizações ${doo(ev.home.name)} e ${shots[1]} ${doo(ev.away.name)}${on ? `, ${on[0]} e ${on[1]} no gol` : ''}.`;
+  }
+  // Sem estatísticas: pela pressão do lance a lance.
+  if (!flow?.list?.length) return '';
+  let wh = 0;
+  let wa = 0;
+  for (const p of flow.list) { if (p.side === 'home') wh += p.w; else wa += p.w; }
+  if (wh + wa < 3) return '';
+  const share = wh / (wh + wa);
+  if (share >= 0.6 || share <= 0.4) return `${cap(o((share >= 0.6 ? ev.home : ev.away).name))} ${live ? 'pressiona' : 'pressionou'} mais.`;
+  return `Jogo equilibrado${live ? ' até agora' : ''}.`;
+}
+
+// Conta chutes e escanteios de um time num trecho do jogo: "3 finalizações e 2 escanteios".
+function chances(list, side) {
+  const shots = list.filter((p) => p.side === side && SHOT_TYPES.test(p.type)).length;
+  const corners = list.filter((p) => p.side === side && p.type === 'corner-awarded').length;
+  const parts = [];
+  if (shots) parts.push(plural(shots, 'finalização', 'finalizações'));
+  if (corners) parts.push(plural(corners, 'escanteio', 'escanteios'));
+  return list2(parts);
+}
+
+// Ao vivo: o que aconteceu nos últimos 10 minutos (ou desde o começo do 2º tempo, se foi há pouco).
+function lately(ev, flow) {
+  if (!flow?.list || flow.now == null) return null;
+  if (ev.status.half) return halves(ev, flow, true);
+  const end = flow.now;
+  // Nos acréscimos do 1º tempo, end é o próprio fim do 1º tempo no gráfico; o 2º começa depois dele.
+  const start = Math.max(end > flow.half ? flow.half : 0, end - 10);
+  if (end - start < 5) return null;
+  const when = start === flow.half ? 'Neste começo de 2º tempo' : 'Nos últimos 10 minutos';
+  const win = flow.list.filter((p) => p.i >= start && p.i < end);
+  let wh = 0;
+  let wa = 0;
+  for (const p of win) { if (p.side === 'home') wh += p.w; else wa += p.w; }
+  if (wh + wa < 1.2) return { label: 'Agora', text: `${when}, quase nada aconteceu: jogo travado.` };
+  const share = wh / (wh + wa);
+  if (share >= 0.65 || share <= 0.35) {
+    const side = share >= 0.65 ? 'home' : 'away';
+    const t = side === 'home' ? ev.home : ev.away;
+    const c = chances(win, side);
+    return { label: 'Agora', text: `${when}, ${o(t.name)} pressiona${c ? `: ${c}` : ''}.` };
+  }
+  const ch = chances(win, 'home') || 'nenhuma chance';
+  const ca = chances(win, 'away') || 'nenhuma';
+  return { label: 'Agora', text: `${when}, jogo lá e cá: ${ch} ${doo(ev.home.name)}, ${ca} ${doo(ev.away.name)}.` };
+}
+
+// Encerrado (ou no intervalo): quem foi melhor em cada tempo.
+function halves(ev, flow, interval = false) {
+  if (!flow?.list) return null;
+  const sum = (from, to) => {
+    let wh = 0;
+    let wa = 0;
+    for (const p of flow.list) if (p.i >= from && p.i < to) { if (p.side === 'home') wh += p.w; else wa += p.w; }
+    if (wh + wa < 3) return 'quiet';
+    const share = wh / (wh + wa);
+    return share >= 0.6 ? 'home' : share <= 0.4 ? 'away' : 'even';
+  };
+  const name = (side) => o(side === 'home' ? ev.home.name : ev.away.name);
+  const b1 = sum(0, flow.half);
+  if (interval) {
+    const text = b1 === 'quiet' ? 'Primeiro tempo de poucas chances.' : b1 === 'even' ? 'Primeiro tempo equilibrado.' : `${cap(name(b1))} foi melhor no 1º tempo.`;
+    return { label: '1º tempo', text };
+  }
+  const b2 = sum(flow.half, flow.slots);
+  let text;
+  if (b1 === 'quiet' && b2 === 'quiet') text = 'Jogo de poucas chances.';
+  else if (b1 === b2 && (b1 === 'home' || b1 === 'away')) text = `${cap(name(b1))} foi melhor nos dois tempos.`;
+  else if (b1 === b2) text = 'Equilibrado nos dois tempos.';
+  else {
+    const first = b1 === 'home' || b1 === 'away' ? `${cap(name(b1))} foi melhor no 1º tempo` : b1 === 'even' ? '1º tempo equilibrado' : '1º tempo de poucas chances';
+    const other = (side) => (side === 'home' ? 'away' : 'home');
+    let second;
+    if (b2 === 'home' || b2 === 'away') second = b1 === 'home' || b1 === 'away' ? `no 2º, ${name(b2)} cresceu` : `no 2º, ${name(b2)} pressionou mais`;
+    else if (b2 === 'even') second = b1 === 'home' || b1 === 'away' ? `no 2º, ${name(other(b1))} equilibrou` : 'o 2º foi equilibrado';
+    else second = 'o 2º teve poucas chances';
+    text = `${first}; ${second}.`;
+  }
+  return { label: 'Os tempos', text };
+}
+
+/**
+ * Leitura do jogo em até 4 linhas curtas, para o torcedor comum: como o placar andou, os lances que
+ * mudaram o jogo sem virar gol, quem manda pelos números e o momento (ao vivo, os últimos 10 minutos;
+ * no intervalo e no fim, cada tempo). plays: parseSummaryPlays; stats: {timeId: {...}}; flow: matchFlow.
+ * Devolve [{label, text}] (vazio antes do jogo).
+ */
+export function matchReading(ev, { plays = null, stats = null, flow = null } = {}) {
+  const live = ev.status.kind === 'live';
+  if (!live && ev.status.kind !== 'post') return [];
+  const out = [{ label: ev.home.score || ev.away.score ? 'Gols' : 'Placar', text: goalStory(ev, plays) }];
+  const hl = highlights(ev, plays, live);
+  if (hl) out.push({ label: 'Destaques', text: hl });
+  const dom = dominance(ev, stats, flow, live);
+  if (dom) out.push({ label: 'Domínio', text: dom });
+  const moment = live ? lately(ev, flow) : halves(ev, flow);
+  if (moment) out.push(moment);
+  return out;
 }
 
 // ---------- últimos confrontos ----------

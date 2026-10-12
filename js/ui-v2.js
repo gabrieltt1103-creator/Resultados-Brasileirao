@@ -3,8 +3,8 @@
 // o número mostra e o que só se consulta de vez em quando fica recolhido. O que não muda (detalhe do
 // time, escolha do time, status dos dados, texto para compartilhar) vem direto de ui.js.
 export * from './ui.js';
-import { crest, flowChart, formDots, miniTable, pct, scorers, secadorLine } from './ui.js';
-import { bucketLabels, flowNote, goalTimeNote, h2hSummary, homeAwayNote, howItWent, statsReading, storyTags, tableLine } from './insights.js';
+import { crest, flowChart, formDots, miniTable, pct, readingList, scorers, secadorLine } from './ui.js';
+import { bucketLabels, goalTimeNote, h2hSummary, homeAwayNote, storyTags, tableLine } from './insights.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, weekdayShort } from './util.js';
 
 const ord = (n) => (n ? `${n}º` : '');
@@ -407,8 +407,7 @@ function statBars(ev, stats) {
   const a = stats?.[ev.away.id];
   const rows = STAT_DEFS.filter(([k]) => Number.isFinite(h?.[k]) && Number.isFinite(a?.[k]) && h[k] + a[k] > 0);
   if (!rows.length) return '';
-  const reading = statsReading(ev, stats);
-  return `${reading ? `<p class="v2-cap first">${esc(reading)}</p>` : ''}${rows.map(([k, name, fmt = (v) => decimal(v)]) => `<div class="v2-sbar">
+  return `${rows.map(([k, name, fmt = (v) => decimal(v)]) => `<div class="v2-sbar">
     <div class="top"><b class="${h[k] < a[k] ? 'lo' : ''}">${fmt(h[k])}</b><span>${esc(name)}</span><b class="${a[k] < h[k] ? 'lo' : ''}">${fmt(a[k])}</b></div>
     <div class="trk"><i class="h" style="flex:${h[k]}"></i><i class="a" style="flex:${a[k]}"></i></div></div>`).join('')}`;
 }
@@ -431,7 +430,7 @@ function h2hBlock(ev, games) {
     ${rows}${sum.streak ? `<p class="v2-cap">${esc(sum.streak)}</p>` : ''}</section>`;
 }
 
-/** Detalhe de um jogo. ctx: {table, scen, stats, statsLoading, formById, favorite, story, roundLabel, picks, zones, inFocus, now} */
+/** Detalhe de um jogo. ctx: {table, scen, stats, statsLoading, formById, favorite, story, roundLabel, picks, zones, inFocus, now, flow, reading} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
   const pre = s.kind === 'pre' || s.kind === 'off';
@@ -444,10 +443,10 @@ export function matchSheet(ev, ctx) {
   };
   const statusText = s.kind === 'live' ? `<span class="live-text">${esc(s.half ? 'Intervalo' : `${s.label} · ao vivo`)}</span>` : post ? 'Encerrado' : s.kind === 'pre' ? esc(kickoff(ev.date, ctx.now)) : esc(s.label);
   const tags = storyTags(ctx.story || {});
-  // Com o lance a lance da ESPN, a linha do jogo vira o fluxo da partida (pressão minuto a minuto).
-  const flowText = ctx.flow ? flowNote(ctx.flow, ev.home, ev.away, s.kind === 'live') : '';
-  const how = [howItWent(ev, ctx.story), flowText].filter(Boolean).join(' ');
-  const showHow = !pre && (ev.incidents.length || post || ctx.flow);
+  // Com o lance a lance da ESPN, a linha do jogo vira o fluxo da partida (pressão minuto a minuto);
+  // embaixo, a leitura do jogo (gols, lances que mudaram o jogo, quem manda e o momento).
+  const reading = ctx.reading || [];
+  const showHow = !pre && (ev.incidents.length || post || ctx.flow || reading.length);
   const stats = ctx.stats ? statBars(ev, ctx.stats) : '';
   const lines = ctx.inFocus && ctx.table && !pre ? [tableLine(ev.home.id, ctx.table, ctx.zones), tableLine(ev.away.id, ctx.table, ctx.zones)].filter(Boolean) : [];
   const form = (t) => {
@@ -460,9 +459,9 @@ export function matchSheet(ev, ctx) {
       ${head(ev.away, 'away')}</div>
     <p class="v2-mmeta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="v2-mtags">${tags.map((t) => `<b class="v2-chip">${esc(t)}</b>`).join('')}</p>` : ''}
-    ${showHow ? `<section class="v2-block"><h3>${s.kind === 'live' ? 'Como está' : 'Como foi'}${ctx.flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>${ctx.flow ? flowChart(ctx.flow, ev, flowText) : track(ev)}
-      ${how ? `<p class="v2-cap">${esc(how)}</p>` : ''}
-      ${lances(ev) || (!ev.home.score && !ev.away.score ? '<p class="v2-cap muted">Sem gols até aqui.</p>' : '')}</section>` : ''}
+    ${showHow ? `<section class="v2-block"><h3>${s.kind === 'live' ? 'Como está' : 'Como foi'}${ctx.flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>${ctx.flow ? flowChart(ctx.flow, ev, reading.map((l) => l.text).join(' ')) : track(ev)}
+      ${readingList(reading)}
+      ${lances(ev)}</section>` : ''}
     ${oddsBlock(ev, ctx.picks)}
     ${stakesBlock(ev, ctx.scen)}
     ${s.kind !== 'post' ? `<button type="button" class="v2-btn dark wide" data-action="simulate" data-id="${esc(ev.id)}">Simular este jogo e ver a tabela</button>` : ''}

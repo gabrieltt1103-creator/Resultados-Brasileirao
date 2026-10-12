@@ -1,7 +1,7 @@
 import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
-import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchStory, roundStats, scoreChange, trends } from './insights.js';
+import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { chances, matchPicks, model, secador, suggestScore } from './sim.js';
 import { objectiveFor, pick, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
@@ -837,13 +837,16 @@ function renderSheet() {
     const sum = state.summaries.get(ev.id);
     const own = Object.keys(ev.home.stats).length ? { [ev.home.id]: ev.home.stats, [ev.away.id]: ev.away.stats } : null;
     const stats = sum?.stats && Object.keys(sum.stats).length ? sum.stats : own;
+    const flow = sum?.plays?.length && (ev.status.kind === 'live' || ev.status.kind === 'post') ? matchFlow(sum.plays, liveClock(ev)) : null;
     html = ui.matchSheet(ev, {
       table: state.table, scen, stats,
       statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
       formById: state.formById, favorite: state.favorite, story: matchStory(ev, inFocus ? preRank : null),
       roundLabel: roundName(state.roundOf.get(ev.id)), now, zones: state.zones, inFocus,
       h2h: sum?.h2h || null,
-      flow: sum?.plays?.length && (ev.status.kind === 'live' || ev.status.kind === 'post') ? matchFlow(sum.plays, liveClock(ev)) : null,
+      flow,
+      // Leitura do jogo: gols, lances que mudaram o jogo, quem manda e o momento.
+      reading: matchReading(ev, { plays: sum?.plays || null, stats, flow }),
       picks: state.table && (ev.status.kind === 'pre' || ev.status.kind === 'live') ? matchPicks(currentModel(), ev) : null,
     });
   } else if (spec.type === 'team') {

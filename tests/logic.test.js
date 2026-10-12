@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseEvent, parseStandings, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
 import { buildRounds, pickDefault } from '../js/rounds.js';
 import { computeTable, distances, finishedTable, formOf, reconcile, scenarios, zonesFor } from '../js/table.js';
-import { goalTimeNote, headlines, homeAwayNote, howItWent, impactLines, lastGoal, matchStory, roundStats, scoreChange, statsReading, tableLine, trends } from '../js/insights.js';
+import { goalTimeNote, headlines, homeAwayNote, impactLines, lastGoal, matchReading, matchStory, roundStats, scoreChange, tableLine, trends } from '../js/insights.js';
 import { deltaMonths, vanished } from '../js/season.js';
 import { objectiveFor, pick, rivalsOf, sameState, secadorSummary, verdict, verdictText } from '../js/secador.js';
 import { statsView, tableCheck } from '../js/ui.js';
@@ -271,12 +271,13 @@ test('frases da v2: destaque das manchetes, gráficos, estatísticas, como foi e
   const g = (team, base, extra, who) => ({ kind: 'goal', team, who, min: { base, extra, label: extra ? `${base}+${extra}'` : `${base}'`, sort: base + extra / 100 } });
   const ev = { id: 'x', status: { kind: 'post' }, home: { ...t('cam', 'Atlético-MG'), score: 2 }, away: { ...t('san', 'Santos'), score: 1 }, goalsComplete: true,
     incidents: [g('san', 88, 0, 'G. Barbosa'), g('cam', 90, 1, 'Vitor Hugo'), g('cam', 90, 7, 'Thiago Borbas')] };
-  const stats = { cam: { totalShots: 21, possessionPct: 50.2, wonCorners: 12 }, san: { totalShots: 10, possessionPct: 49.8, wonCorners: 3 } };
-  assert.equal(statsReading(ev, stats), 'O Atlético-MG finalizou mais que o dobro (21 a 10) e teve 12 escanteios contra 3.');
-  assert.equal(statsReading(ev, { cam: { totalShots: 12, possessionPct: 64 }, san: { totalShots: 11, possessionPct: 36 } }), 'O Atlético-MG teve 64% de posse de bola.');
-  assert.equal(howItWent(ev), 'Os três gols saíram depois dos 88 minutos. O Santos abriu o placar e o Atlético-MG virou nos acréscimos.');
+  const stats = { cam: { totalShots: 21, shotsOnTarget: 5, possessionPct: 50.2, wonCorners: 12 }, san: { totalShots: 10, shotsOnTarget: 3, possessionPct: 49.8, wonCorners: 3 } };
+  assert.deepEqual(matchReading(ev, { stats }), [
+    { label: 'Gols', text: "O Santos abriu o placar aos 88' (G. Barbosa), o Atlético-MG empatou aos 90+1' (Vitor Hugo) e virou aos 90+7' (Thiago Borbas)." },
+    { label: 'Domínio', text: 'O Atlético-MG dominou: 21 finalizações contra 10 (5 a 3 no gol).' },
+  ]);
   const single = { ...ev, home: { ...ev.home, score: 1 }, away: { ...ev.away, score: 0 }, incidents: [g('cam', 65, 0, 'J. Carrascal')] };
-  assert.equal(howItWent(single), "J. Carrascal marcou o único gol, aos 65'.");
+  assert.equal(matchReading(single)[0].text, "O Atlético-MG venceu com gol de J. Carrascal aos 65'.");
 
   const leader = table.rows[0];
   assert.match(tableLine(leader.id, table, zones), /^O .+ (segue|fica) em 1º, \d+ pontos? à frente d[oa] /);
@@ -459,4 +460,42 @@ test('lance a lance ao vivo: chute ainda provisório ("temp-attempt") entra pelo
     ],
   };
   assert.deepEqual(parseSummaryPlays(json).map((p) => `${p.type}:${p.side}`), ['shot-blocked:away', 'shot-on-target:away', 'shot-off-target:home', 'temp-attempt:away', 'own-goal:home']);
+});
+
+test('leitura do jogo: placar, lances que mudaram o jogo, domínio e momento', () => {
+  const t = (id, name, score) => ({ id, name, score });
+  const min = (base, extra = 0) => ({ base, extra, label: extra ? `${base}+${extra}'` : `${base}'`, sort: base + extra / 100 });
+  const goal = (team, base, who, extra = {}) => ({ kind: 'goal', team, who, min: min(base), ...extra });
+  const game = (hs, as, incidents, status = { kind: 'post' }) => ({ id: 'x', status, home: t('h', 'Grêmio', hs), away: t('a', 'Internacional', as), goalsComplete: true, incidents });
+  const read = (ev, opts) => Object.fromEntries(matchReading(ev, opts).map((l) => [l.label, l.text]));
+
+  // Ampliou, diminuiu, empatou e voltou à frente; pênalti e gol contra no texto.
+  let ev = game(3, 2, [goal('h', 10, 'Pedro'), goal('h', 20, 'Pedro', { pen: true }), goal('a', 30, 'Vitinho'), goal('a', 50, 'Zé', { og: true }), goal('h', 80, 'Ana')]);
+  assert.equal(matchReading({ ...ev, incidents: ev.incidents.slice(0, 4), home: t('h', 'Grêmio', 2), away: t('a', 'Internacional', 2) })[0].text,
+    "O Grêmio abriu o placar aos 10' (Pedro), ampliou aos 20' (Pedro, de pênalti), o Internacional diminuiu aos 30' (Vitinho) e empatou aos 50' (gol contra de Zé).");
+  // Cinco gols ou mais: pelo intervalo e pelo fim.
+  assert.equal(read(ev).Gols, 'Jogo de 5 gols: o Grêmio foi para o intervalo vencendo por 2 a 1 e fechou em 3 a 2.');
+  // Sem gols, ao vivo e no fim.
+  assert.equal(read(game(0, 0, [], { kind: 'live', label: "30'" })).Placar, 'Ainda sem gols.');
+  assert.equal(read(game(0, 0, [])).Placar, 'Ficou no 0 a 0.');
+
+  // Expulsão, gol anulado, pênalti perdido e bola na trave (no máximo dois).
+  const red = { kind: 'red', team: 'a', who: 'Bruno', min: min(40) };
+  const play = (type, side, base, more = {}) => ({ type, side, period: base > 45 ? 2 : 1, base, extra: 0, ...more });
+  ev = game(1, 0, [goal('h', 70, 'Pedro'), red]);
+  assert.equal(read(ev, { plays: [play('penalty---saved', 'home', 60, { who: 'Paulinho', keeper: 'Hugo' }), play('shot-hit-woodwork', 'home', 75)] }).Destaques,
+    "O Internacional ficou com um a menos desde os 40' (Bruno expulso). Paulinho perdeu um pênalti aos 60' (defesa de Hugo).");
+  assert.equal(read(game(1, 0, [goal('h', 70, 'Pedro')]), { plays: [play('shot-hit-woodwork', 'away', 75), play('shot-hit-woodwork', 'away', 85)] }).Destaques,
+    'O Internacional acertou a trave 2 vezes.');
+  assert.equal(read(game(0, 0, []), { plays: [play('penalty---saved', 'home', 60, { who: 'Paulinho', keeper: 'Hugo Souza' })] }).Destaques,
+    "Paulinho perdeu um pênalti aos 60' (defesa de Hugo Souza).");
+
+  // Domínio: quem manda e se o placar acompanha; goleiro que segurou.
+  const stats = (hs, as) => ({ h: hs, a: as });
+  assert.equal(read(game(0, 1, [goal('a', 10, 'Vitinho')]), { stats: stats({ totalShots: 18, shotsOnTarget: 7, possessionPct: 64, saves: 1 }, { totalShots: 5, shotsOnTarget: 2, possessionPct: 36, saves: 6 }) }).Domínio,
+    'O Grêmio dominou: 64% de posse e 18 finalizações contra 5 (7 a 2 no gol), mas quem venceu é o Internacional. O goleiro do Internacional fez 6 defesas.');
+  assert.equal(read(game(0, 0, [], { kind: 'live', label: "60'" }), { stats: stats({ totalShots: 9, shotsOnTarget: 3, possessionPct: 56 }, { totalShots: 5, shotsOnTarget: 1, possessionPct: 44 }) }).Domínio,
+    'O Grêmio tem mais o jogo: 56% de posse e 9 finalizações contra 5 (3 a 1 no gol), mas ainda não conseguiu marcar.');
+  assert.equal(read(game(1, 1, []), { stats: stats({ totalShots: 7, shotsOnTarget: 2 }, { totalShots: 8, shotsOnTarget: 3 }) }).Domínio,
+    'Jogo equilibrado: 7 finalizações do Grêmio e 8 do Internacional, 2 e 3 no gol.');
 });

@@ -3,7 +3,7 @@ import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName,
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { chances, matchPicks, model, secador, suggestScore } from './sim.js';
-import { objectiveFor, pick, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
+import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import * as fx from './fx.js';
 import { HOUR, addDays, dayLabel, dm, doo, esc, fmtTime, o, sameDay, save, shortDay, store, ymd } from './util.js';
@@ -89,6 +89,7 @@ const state = {
   rivals: cleanRivals(store(RIVALS_KEY, {})),
   secador: null,          // contas do secador: {round, teamId, teams: {id: {base, games}}}
   secLines: null,         // linha do secador de cada jogo da rodada vista (para os avisos de gol)
+  secFrozen: { key: '', byId: new Map() }, // conselho de cada jogo na hora em que ele começou
   secadorSig: '',
   sheet: null,
   sheetStack: [],
@@ -511,14 +512,25 @@ function secadorView(r) {
   const mine = got?.teams?.[team.id] || null;
   const objective = mine ? objectiveFor(mine.base, state.zones) : null;
   const odds = new Map((mine?.games || []).map((g) => [g.id, g]));
+  // O conselho de um jogo fica fixo quando ele começa: durante a partida o secador só acompanha se
+  // está dando certo (recalcular a cada gol faria a linha mudar ou sumir no meio do jogo).
+  const key = `${r.number}|${team.id}|${[...rivals].sort().join(',')}|${objective}`;
+  if (state.secFrozen.key !== key) state.secFrozen = { key, byId: new Map() };
+  const frozen = state.secFrozen.byId;
   const verdicts = pick(r.events.map((ev) => {
+    if (!mine) return { ev, v: null };
+    const before = frozen.get(ev.id);
+    if (ev.status.kind !== 'pre' && before) return { ev, v: { ...restate(ev, before), keep: before.shown } };
     const stakes = new Map();
     for (const id of rivals) {
       const st = stakeOf(got?.teams?.[id], ev, id, state.zones);
       if (st) stakes.set(id, st);
     }
-    return { ev, v: mine ? verdict(ev, { team, rivals, objective, odds: odds.get(ev.id), stakes }) : null };
+    return { ev, v: verdict(ev, { team, rivals, objective, odds: odds.get(ev.id), stakes }) };
   }));
+  // Guarda o conselho de cada jogo: o dos que vão começar é refeito a cada conta; o dos que já
+  // começaram fica o da primeira vez em que foi visto.
+  for (const { ev, v } of verdicts) if (v && (ev.status.kind === 'pre' || !frozen.has(ev.id))) frozen.set(ev.id, v);
   const ready = state.table?.mode === 'jogos' && !got?.failed;
   const summary = secadorSummary({ team, objective, base: mine?.base || null, verdicts, zones: state.zones, ready, rivals: rivals.size });
   // Jogo sem linha ganha só um aviso discreto, para ficar claro que o secador olhou o jogo
@@ -929,7 +941,7 @@ function flushAlerts() {
       const g = lastGoal(ev, team);
       // Com o secador ligado, o aviso diz se a secada daquele jogo está dando certo.
       const sec = state.secLines?.get(ev.id);
-      const secNote = sec?.state ? `<small class="toast-sec ${sec.good ? 'sec-ok' : 'sec-no'}">Secador: ${sec.good ? '✓ tá dando certo' : '✗ por enquanto, não'}</small>` : '';
+      const secNote = sec?.state ? `<small class="toast-sec ${sec.good ? 'sec-ok' : 'sec-no'}">Secador: ${sec.good ? '✓' : '✗'} ${esc(sec.state.toLowerCase())}</small>` : '';
       toast(`<b class="tag tone-gol">Gol</b><span class="toast-body"><span>${score}</span><small>Gol ${esc(doo(team.name))}${g?.who ? ` · ${esc(g.who)} ${esc(g.min.label)}` : ''}</small>${secNote}</span>`, ev.id);
       if (team.id === state.favorite) celebrate = [team.color, team.color2, '#f5c518'].filter(Boolean);
     }

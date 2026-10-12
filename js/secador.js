@@ -254,12 +254,25 @@ export function verdict(ev, { team, rivals = new Set(), objective = null, odds =
 }
 
 /**
+ * O mesmo conselho com o placar de agora: o que o secador decidiu antes do jogo vale até o fim, e só
+ * muda se está dando certo. Devolve uma cópia de v.
+ */
+export function restate(ev, v) {
+  const now = outcome(ev);
+  const live = ev.status.kind === 'live' || ev.status.kind === 'post';
+  const state = v.ok && now != null && live ? (v.ok.includes(RESULT.indexOf(now)) ? 'ok' : 'no') : null;
+  return { ...v, state };
+}
+
+/**
  * Quais jogos ganham linha, para a rodada não virar um mar de selos: o do time quando há algo em jogo
- * (ou é clássico), os de rival e, dos que só mexem no objetivo, os 3 que mais pesam.
+ * (ou é clássico), os de rival e, dos que só mexem no objetivo, os 3 que mais pesam. Jogo que já
+ * começou e já tinha linha (v.keep) continua com ela.
  * Marca v.shown em cada {ev, v} e devolve a mesma lista.
  */
 export function pick(verdicts, max = 3) {
-  const plain = verdicts.filter((x) => x.v && PLAIN.includes(x.v.kind)).sort((a, b) => b.v.swing - a.v.swing).slice(0, max);
+  const plain = verdicts.filter((x) => x.v && PLAIN.includes(x.v.kind))
+    .sort((a, b) => (b.v.keep ? 1 : 0) - (a.v.keep ? 1 : 0) || b.v.swing - a.v.swing).slice(0, max);
   for (const x of verdicts) {
     if (!x.v) continue;
     const k = x.v.kind;
@@ -310,6 +323,27 @@ function chanceOf(objective, zones, owner = '') {
   return `a chance de ${objective === 'title' ? 'título' : zones?.gLabel || 'G6'}${of}`;
 }
 
+// ---------- humor da rivalidade ----------
+// Só nas secadas pela rivalidade (o resultado em si não muda nada para o seu time): uma frase curta de
+// torcedor, ligada ao que o rival tem em jogo. As secadas pelo resultado ficam sérias, só com os números.
+// Cada jogo pega uma variação fixa (pelo id), para a mesma piada não se repetir na rodada.
+const JOKE = {
+  title: ['Taça na mão do rival, aqui não.', 'Volta olímpica do rival? Melhor não.'],
+  g: ['Libertadores, só pela TV.', 'Libertadores, só no videogame.'],
+  z: ['A Série B tem vaga sobrando.', 'A segunda divisão manda lembranças.'],
+};
+// Depois do jogo, pelo resultado do rival.
+const AFTER = {
+  lost: { title: 'Já pode mandar meme no grupo.', g: 'A Libertadores ficou mais longe.', z: 'A Série B manda lembranças.' },
+  drew: 'Meia secada.',
+  won: 'Hoje não deu. Fica pra próxima.',
+};
+const hash = (text) => [...String(text)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+const joke = (objective, key) => {
+  const list = JOKE[objective] || JOKE.g;
+  return list[hash(key) % list.length];
+};
+
 /**
  * Selo e frase de um jogo. Devolve {chip, text, state} (state: frase curta de ao vivo ou encerrado).
  * Jogo encerrado não pede torcida: diz o que o resultado fez (a conta, ou onde ficou a chance).
@@ -319,7 +353,10 @@ export function verdictText(ev, v, { objective, zones } = {}) {
   if (!v) return null;
   const live = ev.status.kind === 'live';
   const done = ev.status.kind === 'post';
-  const state = v.state === 'ok' ? (live ? 'Tá dando certo' : 'Deu certo') : v.state === 'no' ? (live ? 'Por enquanto, não' : 'Não deu') : '';
+  // Secada pela rivalidade fala como torcedor: "Tá secando", "Secou".
+  const rivalry = ['rival', 'derby', 'pride'].includes(v.kind);
+  const words = rivalry ? ['Tá secando', 'Secou', 'Ainda não secou', 'Não secou'] : ['Tá dando certo', 'Deu certo', 'Por enquanto, não', 'Não deu'];
+  const state = v.state === 'ok' ? words[live ? 0 : 1] : v.state === 'no' ? words[live ? 2 : 3] : '';
   const nums = v.best != null ? numbers(ev, v, objective, zones) : '';
   const cheer = v.cheer?.name;
   const dry = v.dry?.name;
@@ -350,7 +387,7 @@ export function verdictText(ev, v, { objective, zones } = {}) {
     case 'double':
       return { chip: 'Seca em dobro', text: done ? nums : `Secar ${o(dry)}, seu rival, ainda ajuda o seu time. ${nums}`, state };
     case 'nose':
-      if (done) return { chip: 'Nariz tapado', text: `${nums}${v.state === 'ok' ? ` Dessa vez, foi bom ${o(cheer)} vencer.` : ''}`, state };
+      if (done) return { chip: 'Nariz tapado', text: `${nums}${v.state === 'ok' ? ` Dessa vez, foi bom ${o(cheer)} vencer. Fica entre nós.` : ''}`, state };
       return { chip: 'Nariz tapado', text: `Dessa vez, torça ${pelo(cheer)}, seu rival. ${nums}${v.both ? ` Pelo menos ${o(dry)} perde.` : ''} Ninguém precisa saber.`, state };
     case 'pride':
       if (done) {
@@ -374,15 +411,17 @@ export function verdictText(ev, v, { objective, zones } = {}) {
     case 'nodraw':
       return { chip: 'Tem que ter vencedor', text: done ? nums : `Tanto faz quem vença: o empate é o pior para você. ${nums}`, state };
     case 'derby': {
-      if (!done) return { chip: 'Clássico dos rivais', text: 'Torça pelo empate: os dois perdem pontos.', state };
+      if (!done) return { chip: 'Clássico dos rivais', text: 'Torça pelo empate, de preferência um 0 a 0 bem feio.', state };
       const winner = now > 0 ? ev.home : now < 0 ? ev.away : null;
-      return { chip: 'Clássico dos rivais', text: winner ? `${cap(o(winner.name))} venceu; o melhor era o empate.` : 'Empate: os dois rivais perderam pontos.', state };
+      if (winner) return { chip: 'Clássico dos rivais', text: `${cap(o(winner.name))} venceu. Pelo menos ${o((winner === ev.home ? ev.away : ev.home).name)} perdeu.`, state };
+      return { chip: 'Clássico dos rivais', text: ev.home.score ? 'Empate: os dois rivais saíram no prejuízo.' : 'Empate em 0 a 0, do jeito que a gente gosta.', state };
     }
     case 'rival': {
-      if (!done) return { chip: `Seque ${o(dry)}`, text: `Torça ${pelo(cheer)}. ${rivalLoss(v.dry, v.stake, zones)}`, state };
+      if (!done) return { chip: `Seque ${o(dry)}`, text: `Torça ${pelo(cheer)}. ${rivalLoss(v.dry, v.stake, zones)} ${joke(v.stake.objective, ev.id)}`, state };
       const r = resultOf(v.dry);
       const p = r > 0 ? v.stake.win : r < 0 ? v.stake.lose : v.stake.draw;
-      return { chip: `Seque ${o(dry)}`, text: `${cap(o(dry))} ${r > 0 ? 'venceu' : r < 0 ? 'perdeu' : 'empatou'}: ${chanceOf(v.stake.objective, zones, dele(dry))} ficou em ${pct(p)}.`, state };
+      const after = r > 0 ? AFTER.won : r < 0 ? AFTER.lost[v.stake.objective] : AFTER.drew;
+      return { chip: `Seque ${o(dry)}`, text: `${cap(o(dry))} ${r > 0 ? 'venceu' : r < 0 ? 'perdeu' : 'empatou'}: ${chanceOf(v.stake.objective, zones, dele(dry))} ficou em ${pct(p)}. ${after}`, state };
     }
     default:
       return { chip: '', text: '', state: '' };

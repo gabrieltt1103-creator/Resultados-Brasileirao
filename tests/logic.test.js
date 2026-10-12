@@ -5,7 +5,7 @@ import { buildRounds, pickDefault } from '../js/rounds.js';
 import { computeTable, distances, finishedTable, formOf, reconcile, scenarios, zonesFor } from '../js/table.js';
 import { goalTimeNote, headlines, homeAwayNote, impactLines, lastGoal, matchReading, matchStory, roundStats, scoreChange, tableLine, trends } from '../js/insights.js';
 import { deltaMonths, vanished } from '../js/season.js';
-import { objectiveFor, pick, rivalsOf, sameState, secadorSummary, verdict, verdictText } from '../js/secador.js';
+import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, verdict, verdictText } from '../js/secador.js';
 import { statsView, tableCheck } from '../js/ui.js';
 import { chances, matchPicks, model, randomScore, rng, suggestScore } from '../js/sim.js';
 import { parseMinute } from '../js/util.js';
@@ -350,7 +350,7 @@ test('secador: para quem torcer em cada jogo', () => {
   assert.equal(r.v.kind, 'pride');
   assert.equal(r.chip, 'Seque o Coritiba');
   assert.equal(r.text, 'A vitória do Coritiba até ajudaria um pouquinho a sua chance de G6, mas tem coisa que não se faz.');
-  assert.equal(read(cap, game('Atlético-MG', 'Coritiba', 'live', 1, 0), [0.86, 0.87, 0.882]).state, 'Tá dando certo');
+  assert.equal(read(cap, game('Atlético-MG', 'Coritiba', 'live', 1, 0), [0.86, 0.87, 0.882]).state, 'Tá secando');
   // Ganho bom, mas a vitória ajudaria mais o rival na briga dele: seque mesmo.
   r = read(cap, game('Atlético-MG', 'Coritiba'), [0.868, 0.892, 0.903], 'g', { Coritiba: { objective: 'z', win: 0.2, draw: 0.32, lose: 0.4 } });
   assert.equal(r.v.kind, 'pride');
@@ -370,25 +370,31 @@ test('secador: para quem torcer em cada jogo', () => {
   assert.equal(read('Atlético-MG', game('Grêmio', 'Cruzeiro'), [0.64, 0.62, 0.59]).chip, 'Seca em dobro');
   assert.equal(read(cap, game('Bahia', 'Vitória'), [0.70, 0.60, 0.69]).v.kind, 'nodraw');
 
-  // Só pela rivalidade: quando o jogo dói para o rival, numa briga aberta.
+  // Só pela rivalidade: quando o jogo dói para o rival, numa briga aberta. Aqui cabe uma piada de
+  // torcedor, ligada ao que o rival tem em jogo; nas secadas pelo resultado, não.
   const flat = [0.877, 0.877, 0.877];
-  r = read(cap, game('Coritiba', 'Remo'), flat, 'g', { Coritiba: { objective: 'z', win: 0.12, draw: 0.25, lose: 0.33 } });
+  const cfc = { Coritiba: { objective: 'z', win: 0.12, draw: 0.25, lose: 0.33 } };
+  r = read(cap, game('Coritiba', 'Remo'), flat, 'g', cfc);
   assert.equal(r.v.kind, 'rival');
-  assert.equal(r.text, 'Torça pelo Remo. Se o Coritiba perder, o risco de cair dele sobe para 33%.');
-  r = read(cap, game('Coritiba', 'Remo', 'live', 0, 0), flat, 'g', { Coritiba: { objective: 'z', win: 0.12, draw: 0.25, lose: 0.33 } });
-  assert.equal(r.state, 'Tá dando certo');
+  assert.match(r.text, /^Torça pelo Remo\. Se o Coritiba perder, o risco de cair dele sobe para 33%\. (A Série B tem vaga sobrando|A segunda divisão manda lembranças)\.$/);
+  assert.equal(read(cap, game('Coritiba', 'Remo', 'live', 0, 0), flat, 'g', cfc).state, 'Tá secando');
+  assert.equal(read(cap, game('Coritiba', 'Remo', 'live', 1, 0), flat, 'g', cfc).state, 'Ainda não secou');
+  assert.equal(read(cap, game('Coritiba', 'Remo', 'post', 0, 2), flat, 'g', cfc).text, 'O Coritiba perdeu: o risco de cair dele ficou em 33%. A Série B manda lembranças.');
   // Rival tranquilo (93% de G6), com briga quase perdida (8%) ou sem nada em jogo: sem linha.
   assert.equal(read(cap, game('Coritiba', 'Remo'), flat, 'g', { Coritiba: { objective: 'g', win: 0.97, draw: 0.91, lose: 0.85 } }).v.kind, 'none');
   assert.equal(read(cap, game('Coritiba', 'Remo'), flat, 'g', { Coritiba: { objective: 'g', win: 0.19, draw: 0.08, lose: 0.04 } }).v.kind, 'none');
   assert.equal(read(cap, game('Coritiba', 'Remo'), flat).v.kind, 'none');
   // Rival na briga pelo título: "a chance de título dele cai".
   r = read('Vasco', game('Bahia', 'Flamengo'), null, null, { Flamengo: { objective: 'title', win: 0.69, draw: 0.54, lose: 0.47 } });
-  assert.equal(r.text, 'Torça pelo Bahia. Se o Flamengo perder, a chance de título dele cai para 47%.');
+  assert.match(r.text, /^Torça pelo Bahia\. Se o Flamengo perder, a chance de título dele cai para 47%\. (Taça na mão do rival, aqui não|Volta olímpica do rival\? Melhor não)\.$/);
   // Dois rivais, um deles em apuros: empate.
   r = read('Vasco', game('Flamengo', 'Fluminense', 'post', 2, 1), null, null, { Flamengo: { objective: 'title', win: 0.69, draw: 0.54, lose: 0.47 } });
   assert.equal(r.v.kind, 'derby');
-  assert.equal(r.state, 'Não deu');
+  assert.equal(r.state, 'Não secou');
+  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'pre'), null, null, { Flamengo: { objective: 'title', win: 0.69, draw: 0.54, lose: 0.47 } }).text, 'Torça pelo empate, de preferência um 0 a 0 bem feio.');
   assert.equal(read('Vasco', game('Flamengo', 'Fluminense'), null, null).v.kind, 'none');
+  // Secada pelo resultado continua séria.
+  assert.equal(read(cap, game('Grêmio', 'Cruzeiro', 'live', 0, 0), [0.889, 0.883, 0.864]).state, 'Tá dando certo');
 
   // Risco de cair pequeno: um oitavo do risco já importa (com uma casa decimal); oscilação do sorteio, não.
   r = read('Vasco', game('Grêmio', 'Cruzeiro'), [0.044, 0.035, 0.031], 'z');
@@ -414,10 +420,12 @@ test('secador: para quem torcer em cada jogo', () => {
   assert.equal(read('Vasco', game('Remo', 'Vasco', 'post', 0, 2), [0.06, 0.04, 0.01], 'z').text, 'Com a vitória, o risco de cair ficou em 1,0%.');
   const fla = { Flamengo: { objective: 'title', win: 0.69, draw: 0.54, lose: 0.47 } };
   r = read('Vasco', game('Bahia', 'Flamengo', 'post', 2, 0), null, null, fla);
-  assert.deepEqual([r.text, r.state], ['O Flamengo perdeu: a chance de título dele ficou em 47%.', 'Deu certo']);
-  assert.equal(read('Vasco', game('Bahia', 'Flamengo', 'post', 0, 1), null, null, fla).text, 'O Flamengo venceu: a chance de título dele ficou em 69%.');
-  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 1, 0), null, null, fla).text, 'O Flamengo venceu; o melhor era o empate.');
-  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 1, 1), null, null, fla).text, 'Empate: os dois rivais perderam pontos.');
+  assert.deepEqual([r.text, r.state], ['O Flamengo perdeu: a chance de título dele ficou em 47%. Já pode mandar meme no grupo.', 'Secou']);
+  assert.equal(read('Vasco', game('Bahia', 'Flamengo', 'post', 1, 1), null, null, fla).text, 'O Flamengo empatou: a chance de título dele ficou em 54%. Meia secada.');
+  assert.equal(read('Vasco', game('Bahia', 'Flamengo', 'post', 0, 1), null, null, fla).text, 'O Flamengo venceu: a chance de título dele ficou em 69%. Hoje não deu. Fica pra próxima.');
+  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 1, 0), null, null, fla).text, 'O Flamengo venceu. Pelo menos o Fluminense perdeu.');
+  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 1, 1), null, null, fla).text, 'Empate: os dois rivais saíram no prejuízo.');
+  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 0, 0), null, null, fla).text, 'Empate em 0 a 0, do jeito que a gente gosta.');
   assert.equal(read(cap, game('Atlético-MG', 'Coritiba', 'post', 2, 0), [0.86, 0.87, 0.882]).text, 'O Coritiba não venceu: secada cumprida.');
   assert.equal(read(cap, game('Atlético-MG', 'Coritiba', 'post', 0, 1), [0.86, 0.87, 0.882]).text, 'O Coritiba venceu. Pelo menos ajudou um pouquinho a sua chance de G6.');
   assert.equal(verdict(game('Grêmio', 'Cruzeiro', 'off'), { team: club(cap) }), null);
@@ -518,4 +526,24 @@ test('leitura do jogo: placar, lances que mudaram o jogo, domínio e momento', (
     'O Grêmio tem mais o jogo: 56% de posse e 9 finalizações contra 5 (3 a 1 no gol), mas ainda não conseguiu marcar.');
   assert.equal(read(game(1, 1, []), { stats: stats({ totalShots: 7, shotsOnTarget: 2 }, { totalShots: 8, shotsOnTarget: 3 }) }).Domínio,
     'Jogo equilibrado: 7 finalizações do Grêmio e 8 do Internacional, 2 e 3 no gol.');
+});
+
+test('secador: o conselho decidido antes do jogo vale até o fim', () => {
+  const team = club('Vasco');
+  const rivals = rivalsOf(team, league, {});
+  const game = (h, a, kind = 'pre', hs = null, as = null) => ({ id: `${h}-${a}`, home: { ...club(h), score: hs }, away: { ...club(a), score: as }, status: { kind, label: '' } });
+  // Antes do jogo: torça pelo empate entre Grêmio e Internacional.
+  const before = verdict(game('Grêmio', 'Internacional'), { team, rivals, objective: 'z', odds: { z: [0.0413, 0.036, 0.0403] } });
+  assert.equal(before.kind, 'draw');
+  // Durante o jogo, só muda se está dando certo.
+  assert.equal(restate(game('Grêmio', 'Internacional', 'live', 1, 0), before).state, 'no');
+  assert.equal(restate(game('Grêmio', 'Internacional', 'live', 1, 1), before).state, 'ok');
+  assert.equal(restate(game('Grêmio', 'Internacional', 'post', 1, 1), before).kind, 'draw');
+  // Linha que já começou não sai da rodada por causa do limite de 3, mesmo pesando menos que as outras.
+  const list = [
+    { ev: game('Grêmio', 'Internacional', 'live', 0, 0), v: { ...restate(game('Grêmio', 'Internacional', 'live', 0, 0), before), keep: true } },
+    ...['Bahia', 'Mirassol', 'Santos'].map((h, i) => ({ ev: game(h, 'Remo'), v: { kind: 'help', swing: 0.02 + i * 0.01 } })),
+  ];
+  pick(list);
+  assert.deepEqual(list.map((x) => x.v.shown), [true, false, true, true]);
 });

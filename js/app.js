@@ -28,6 +28,7 @@ const ODDS_RUNS = 3000;
 const SECADOR_RUNS = 4000;
 const SECADOR_KEY = 'secador';
 const RIVALS_KEY = 'rivais:v1';
+const ADVICE_KEY = 'secador-conselhos:v1';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -89,7 +90,7 @@ const state = {
   rivals: cleanRivals(store(RIVALS_KEY, {})),
   secador: null,          // contas do secador: {round, teamId, teams: {id: {base, games}}}
   secLines: null,         // linha do secador de cada jogo da rodada vista (para os avisos de gol)
-  secFrozen: { key: '', byId: new Map() }, // conselho de cada jogo na hora em que ele começou
+  secFrozen: loadAdvice(), // conselho de cada jogo na hora em que ele começou (fica salvo no celular)
   secadorSig: '',
   sheet: null,
   sheetStack: [],
@@ -105,6 +106,21 @@ function cleanSims(raw) {
     for (const [id, v] of Object.entries(raw)) if (Number.isInteger(v?.h) && Number.isInteger(v?.a)) out[id] = { h: v.h, a: v.a };
   }
   return out;
+}
+
+// Conselhos do secador já fixados (jogos que começaram), para valerem também depois de recarregar.
+function loadAdvice() {
+  const raw = store(ADVICE_KEY, null);
+  const byId = new Map(raw && typeof raw.key === 'string' && raw.byId && typeof raw.byId === 'object' ? Object.entries(raw.byId) : []);
+  return { key: raw?.key || '', byId };
+}
+
+function saveAdvice() {
+  const { key, byId } = state.secFrozen;
+  const team = (t) => (t ? { id: t.id, name: t.name } : null);
+  const slim = {};
+  for (const [id, v] of byId) slim[id] = { ...v, cheer: team(v.cheer), dry: team(v.dry), state: null, keep: undefined };
+  save(ADVICE_KEY, { key, byId: slim });
 }
 
 // Rivais escolhidos por time: {idDoTime: [ids]}.
@@ -529,8 +545,14 @@ function secadorView(r) {
     return { ev, v: verdict(ev, { team, rivals, objective, odds: odds.get(ev.id), stakes }) };
   }));
   // Guarda o conselho de cada jogo: o dos que vão começar é refeito a cada conta; o dos que já
-  // começaram fica o da primeira vez em que foi visto.
-  for (const { ev, v } of verdicts) if (v && (ev.status.kind === 'pre' || !frozen.has(ev.id))) frozen.set(ev.id, v);
+  // começaram fica o da primeira vez em que foi visto (e é salvo, para valer depois de recarregar).
+  let fixed = false;
+  for (const { ev, v } of verdicts) {
+    if (!v || (ev.status.kind !== 'pre' && frozen.has(ev.id))) continue;
+    frozen.set(ev.id, v);
+    if (ev.status.kind !== 'pre') fixed = true;
+  }
+  if (fixed) saveAdvice();
   const ready = state.table?.mode === 'jogos' && !got?.failed;
   const summary = secadorSummary({ team, objective, base: mine?.base || null, verdicts, zones: state.zones, ready, rivals: rivals.size });
   // Jogo sem linha ganha só um aviso discreto, para ficar claro que o secador olhou o jogo

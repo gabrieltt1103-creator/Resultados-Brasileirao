@@ -459,7 +459,7 @@ export function matchSheet(ev, ctx) {
       ${head(ev.away, 'away')}</div>
     <p class="v2-mmeta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="v2-mtags">${tags.map((t) => `<b class="v2-chip">${esc(t)}</b>`).join('')}</p>` : ''}
-    ${showHow ? `<section class="v2-block"><h3>${s.kind === 'live' ? 'Como está' : 'Como foi'}${ctx.flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>${ctx.flow ? flowChart(ctx.flow, ev, reading.map((l) => l.text).join(' ')) : track(ev)}
+    ${showHow ? `<section class="v2-block"><h3>${s.kind === 'live' ? 'Como está' : 'Como foi'}${ctx.flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>${ctx.flow ? flowChart(ctx.flow, ev, reading.join(' ')) : track(ev)}
       ${readingList(reading)}
       ${lances(ev)}</section>` : ''}
     ${oddsBlock(ev, ctx.picks)}

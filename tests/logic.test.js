@@ -273,11 +273,13 @@ test('frases da v2: destaque das manchetes, gráficos, estatísticas, como foi e
     incidents: [g('san', 88, 0, 'G. Barbosa'), g('cam', 90, 1, 'Vitor Hugo'), g('cam', 90, 7, 'Thiago Borbas')] };
   const stats = { cam: { totalShots: 21, shotsOnTarget: 5, possessionPct: 50.2, wonCorners: 12 }, san: { totalShots: 10, shotsOnTarget: 3, possessionPct: 49.8, wonCorners: 3 } };
   assert.deepEqual(matchReading(ev, { stats }), [
-    { label: 'Gols', text: "O Santos abriu o placar aos 88' (G. Barbosa), o Atlético-MG empatou aos 90+1' (Vitor Hugo) e virou aos 90+7' (Thiago Borbas)." },
-    { label: 'Domínio', text: 'O Atlético-MG dominou: 21 finalizações contra 10 (5 a 3 no gol).' },
+    "O Santos abriu o placar aos 88', com G. Barbosa. Nos acréscimos, o Atlético-MG empatou aos 90+1', com Vitor Hugo, e virou aos 90+7', com Thiago Borbas.",
+    'Virada no apagar das luzes.',
   ]);
   const single = { ...ev, home: { ...ev.home, score: 1 }, away: { ...ev.away, score: 0 }, incidents: [g('cam', 65, 0, 'J. Carrascal')] };
-  assert.equal(matchReading(single)[0].text, "O Atlético-MG venceu com gol de J. Carrascal aos 65'.");
+  // Sem estatísticas nem lance a lance, não há veredito: só o que aconteceu.
+  assert.deepEqual(matchReading(single), ["O Atlético-MG abriu o placar aos 65', com J. Carrascal."]);
+  assert.equal(matchReading(single, { stats }).at(-1), 'Vitória merecida.');
 
   const leader = table.rows[0];
   assert.match(tableLine(leader.id, table, zones), /^O .+ (segue|fica) em 1º, \d+ pontos? à frente d[oa] /);
@@ -490,42 +492,70 @@ test('lance a lance ao vivo: chute ainda provisório ("temp-attempt") entra pelo
   assert.deepEqual(parseSummaryPlays(json).map((p) => `${p.type}:${p.side}`), ['shot-blocked:away', 'shot-on-target:away', 'shot-off-target:home', 'temp-attempt:away', 'own-goal:home']);
 });
 
-test('leitura do jogo: placar, lances que mudaram o jogo, domínio e momento', () => {
+test('leitura do jogo: contada em parágrafos, com os lances na ordem e o veredito', () => {
   const t = (id, name, score) => ({ id, name, score });
   const min = (base, extra = 0) => ({ base, extra, label: extra ? `${base}+${extra}'` : `${base}'`, sort: base + extra / 100 });
-  const goal = (team, base, who, extra = {}) => ({ kind: 'goal', team, who, min: min(base), ...extra });
+  const goal = (team, base, who, more = {}) => ({ kind: 'goal', team, who, min: min(base, more.extra), ...more });
   const game = (hs, as, incidents, status = { kind: 'post' }) => ({ id: 'x', status, home: t('h', 'Grêmio', hs), away: t('a', 'Internacional', as), goalsComplete: true, incidents });
-  const read = (ev, opts) => Object.fromEntries(matchReading(ev, opts).map((l) => [l.label, l.text]));
-
-  // Ampliou, diminuiu, empatou e voltou à frente; pênalti e gol contra no texto.
-  let ev = game(3, 2, [goal('h', 10, 'Pedro'), goal('h', 20, 'Pedro', { pen: true }), goal('a', 30, 'Vitinho'), goal('a', 50, 'Zé', { og: true }), goal('h', 80, 'Ana')]);
-  assert.equal(matchReading({ ...ev, incidents: ev.incidents.slice(0, 4), home: t('h', 'Grêmio', 2), away: t('a', 'Internacional', 2) })[0].text,
-    "O Grêmio abriu o placar aos 10' (Pedro), ampliou aos 20' (Pedro, de pênalti), o Internacional diminuiu aos 30' (Vitinho) e empatou aos 50' (gol contra de Zé).");
-  // Cinco gols ou mais: pelo intervalo e pelo fim.
-  assert.equal(read(ev).Gols, 'Jogo de 5 gols: o Grêmio foi para o intervalo vencendo por 2 a 1 e fechou em 3 a 2.');
-  // Sem gols, ao vivo e no fim.
-  assert.equal(read(game(0, 0, [], { kind: 'live', label: "30'" })).Placar, 'Ainda sem gols.');
-  assert.equal(read(game(0, 0, [])).Placar, 'Ficou no 0 a 0.');
-
-  // Expulsão, gol anulado, pênalti perdido e bola na trave (no máximo dois).
-  const red = { kind: 'red', team: 'a', who: 'Bruno', min: min(40) };
   const play = (type, side, base, more = {}) => ({ type, side, period: base > 45 ? 2 : 1, base, extra: 0, ...more });
-  ev = game(1, 0, [goal('h', 70, 'Pedro'), red]);
-  assert.equal(read(ev, { plays: [play('penalty---saved', 'home', 60, { who: 'Paulinho', keeper: 'Hugo' }), play('shot-hit-woodwork', 'home', 75)] }).Destaques,
-    "O Internacional ficou com um a menos desde os 40' (Bruno expulso). Paulinho perdeu um pênalti aos 60' (defesa de Hugo).");
-  assert.equal(read(game(1, 0, [goal('h', 70, 'Pedro')]), { plays: [play('shot-hit-woodwork', 'away', 75), play('shot-hit-woodwork', 'away', 85)] }).Destaques,
-    'O Internacional acertou a trave 2 vezes.');
-  assert.equal(read(game(0, 0, []), { plays: [play('penalty---saved', 'home', 60, { who: 'Paulinho', keeper: 'Hugo Souza' })] }).Destaques,
-    "Paulinho perdeu um pênalti aos 60' (defesa de Hugo Souza).");
-
-  // Domínio: quem manda e se o placar acompanha; goleiro que segurou.
   const stats = (hs, as) => ({ h: hs, a: as });
-  assert.equal(read(game(0, 1, [goal('a', 10, 'Vitinho')]), { stats: stats({ totalShots: 18, shotsOnTarget: 7, possessionPct: 64, saves: 1 }, { totalShots: 5, shotsOnTarget: 2, possessionPct: 36, saves: 6 }) }).Domínio,
-    'O Grêmio dominou: 64% de posse e 18 finalizações contra 5 (7 a 2 no gol), mas quem venceu é o Internacional. O goleiro do Internacional fez 6 defesas.');
-  assert.equal(read(game(0, 0, [], { kind: 'live', label: "60'" }), { stats: stats({ totalShots: 9, shotsOnTarget: 3, possessionPct: 56 }, { totalShots: 5, shotsOnTarget: 1, possessionPct: 44 }) }).Domínio,
-    'O Grêmio tem mais o jogo: 56% de posse e 9 finalizações contra 5 (3 a 1 no gol), mas ainda não conseguiu marcar.');
-  assert.equal(read(game(1, 1, []), { stats: stats({ totalShots: 7, shotsOnTarget: 2 }, { totalShots: 8, shotsOnTarget: 3 }) }).Domínio,
-    'Jogo equilibrado: 7 finalizações do Grêmio e 8 do Internacional, 2 e 3 no gol.');
+
+  // Um parágrafo por tempo; gols seguidos do mesmo time na mesma frase; quem marcou de novo; pênalti e gol contra.
+  const ev = game(3, 2, [goal('h', 10, 'Pedro'), goal('h', 20, 'Pedro', { pen: true }), goal('a', 30, 'Vitinho'), goal('a', 50, 'Zé', { og: true }), goal('h', 80, 'Ana')]);
+  assert.deepEqual(matchReading(ev), [
+    "O Grêmio abriu o placar aos 10', com Pedro, e ampliou aos 20', de pênalti, de novo com Pedro. O Internacional diminuiu aos 30', com Vitinho.",
+    "No segundo tempo, o Internacional empatou aos 50', num gol contra de Zé. O Grêmio voltou à frente aos 80', com Ana.",
+  ]);
+  // Hat-trick e goleada; virada; empate buscado nos acréscimos.
+  assert.deepEqual(matchReading(game(3, 0, [goal('h', 10, 'Pedro'), goal('h', 30, 'Pedro'), goal('h', 80, 'Pedro')])).slice(1), [
+    "No segundo tempo, o Grêmio fez o terceiro aos 80', com Pedro completando o hat-trick.",
+    'Goleada sem discussão.',
+  ]);
+  const turn = game(2, 1, [goal('a', 20, 'Vitinho'), goal('h', 55, 'Pedro'), goal('h', 70, 'Ana')]);
+  assert.deepEqual(matchReading(turn, { stats: stats({ totalShots: 15, possessionPct: 60 }, { totalShots: 6, possessionPct: 40 }) }).slice(1), [
+    "No segundo tempo, o Grêmio empatou aos 55', com Pedro, e virou aos 70', com Ana.",
+    'Virada merecida.',
+  ]);
+  assert.deepEqual(matchReading(game(1, 1, [goal('a', 20, 'Vitinho'), goal('h', 90, 'Pedro', { extra: 3 })])).slice(1), [
+    "Nos acréscimos, o Grêmio empatou aos 90+3', com Pedro.",
+    'O Grêmio buscou o empate no fim.',
+  ]);
+
+  // Pênalti perdido (para quê), gol que finalmente sai, bola na trave e expulsão.
+  const red = { kind: 'red', team: 'a', who: 'Bruno', min: min(40) };
+  assert.deepEqual(matchReading(game(1, 0, [goal('h', 70, 'Pedro'), red]), { plays: [play('penalty---saved', 'home', 60, { who: 'Paulinho', keeper: 'Hugo' }), play('shot-hit-woodwork', 'home', 75)] }), [
+    "O Internacional ficou com um a menos aos 40', com a expulsão de Bruno.",
+    "No segundo tempo, o Grêmio teve um pênalti para abrir o placar aos 60', mas Hugo defendeu a cobrança de Paulinho. Até que, aos 70', abriu o placar, com Pedro. Ainda acertou a trave.",
+  ]);
+  assert.deepEqual(matchReading(game(1, 0, [goal('h', 70, 'Pedro')]), { plays: [play('shot-hit-woodwork', 'away', 75), play('shot-hit-woodwork', 'away', 85)] }), [
+    "O Grêmio abriu o placar aos 70', com Pedro. O Internacional acertou a trave duas vezes.",
+  ]);
+  // Gol anulado pelo VAR e o que valeu logo depois, do mesmo jogador; pênalti perdido no fim: susto.
+  const scare = game(0, 1, [goal('a', 30, 'Vitinho')]);
+  assert.deepEqual(matchReading(scare, { plays: [play('deleted-after-review', 'away', 22, { who: 'Vitinho' }), { ...play('penalty---missed', 'home', 90, { who: 'Pedro' }), extra: 5 }] }), [
+    "O Internacional chegou a marcar aos 22', com Vitinho, mas o VAR anulou. O gol veio pouco depois, aos 30', com o próprio Vitinho.",
+    "Nos acréscimos, o Grêmio teve um pênalti para empatar aos 90+5', mas Pedro desperdiçou.",
+    'Vitória com susto no fim.',
+  ]);
+
+  // Veredito pelas estatísticas: vitória no sufoco, de quem foi mais eficiente, empate com gosto de derrota.
+  const lone = game(0, 1, [goal('a', 10, 'Vitinho')]);
+  assert.equal(matchReading(lone, { stats: stats({ totalShots: 18, possessionPct: 64, saves: 1 }, { totalShots: 5, possessionPct: 36, saves: 6 }) }).at(-1),
+    'Vitória no sufoco: o Grêmio criou bem mais, mas parou no goleiro do Internacional.');
+  assert.equal(matchReading(lone, { stats: stats({ totalShots: 12, possessionPct: 50 }, { totalShots: 8, possessionPct: 50 }) }).at(-1),
+    'O Grêmio criou mais, mas o Internacional foi mais eficiente.');
+  assert.equal(matchReading(game(0, 0, []), { stats: stats({ totalShots: 16, possessionPct: 62, saves: 1 }, { totalShots: 4, possessionPct: 38, saves: 2 }) }).at(-1),
+    'Empate com gosto de derrota para o Grêmio, que criou mais, mas faltou pontaria.');
+  assert.equal(matchReading(game(1, 1, []), { stats: stats({ totalShots: 7 }, { totalShots: 8 }) }).at(-1), 'Empate justo.');
+  assert.equal(matchReading(game(0, 0, []), { stats: stats({ totalShots: 13 }, { totalShots: 12 }) }).at(-1), 'Um 0 a 0 movimentado, que podia ter saído para qualquer lado.');
+
+  // Sem gols e sem lance a lance: ao vivo, quem tem mais o jogo; sem dados, o básico.
+  assert.deepEqual(matchReading(game(0, 0, [], { kind: 'live', label: "60'" }), { stats: stats({ totalShots: 9, possessionPct: 56 }, { totalShots: 5, possessionPct: 44 }) }),
+    ['O Grêmio tem mais o jogo, mas ainda não conseguiu marcar.']);
+  assert.deepEqual(matchReading(game(0, 0, [], { kind: 'live', label: "8'" })), ['Começo de jogo, ainda sem chances claras.']);
+  assert.deepEqual(matchReading(game(0, 0, [], { kind: 'live', label: "30'" })), ['Ainda sem gols.']);
+  assert.deepEqual(matchReading(game(0, 0, [])), ['Ficou no 0 a 0.']);
+  assert.deepEqual(matchReading(game(0, 0, [], { kind: 'pre' })), []);
 });
 
 test('secador: o conselho decidido antes do jogo vale até o fim', () => {

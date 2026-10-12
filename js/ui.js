@@ -493,10 +493,10 @@ function h2hBlock(ev, games) {
   return `<section class="sheet-block"><h3 class="sub-title">Últimos confrontos</h3>${rows}<p class="chart-note">${esc(sum.note)}</p></section>`;
 }
 
-/** Leitura do jogo em linhas curtas, cada uma com o assunto à esquerda (Gols, Destaques, Domínio, Agora). */
-export function readingList(lines) {
-  if (!lines?.length) return '';
-  return `<dl class="reading">${lines.map((l) => `<div><dt>${esc(l.label)}</dt><dd>${esc(l.text)}</dd></div>`).join('')}</dl>`;
+/** Leitura do jogo, contada em poucos parágrafos curtos (um por tempo e o fecho). */
+export function readingList(paragraphs) {
+  if (!paragraphs?.length) return '';
+  return `<div class="reading">${paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')}</div>`;
 }
 
 // Como está (ou como foi) o jogo: o fluxo da partida e a leitura logo abaixo.
@@ -505,7 +505,7 @@ function readingBlock(ev, flow, lines) {
   const live = ev.status.kind === 'live';
   return `<section class="sheet-block">
     <h3 class="sub-title">${live ? 'Como está o jogo' : 'Como foi o jogo'}${flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>
-    ${flow ? flowChart(flow, ev, (lines || []).map((l) => l.text).join(' ')) : ''}
+    ${flow ? flowChart(flow, ev, (lines || []).join(' ')) : ''}
     ${readingList(lines)}
   </section>`;
 }

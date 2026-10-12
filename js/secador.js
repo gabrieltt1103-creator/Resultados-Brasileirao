@@ -210,7 +210,9 @@ export function verdict(ev, { team, rivals = new Set(), objective = null, odds =
     // Resultado do meio quase tão bom quanto o melhor: o que importa é o pior não acontecer.
     const loose = good[mid] - good[w] >= 0.6 * v.swing;
     v.ok = loose ? [b, mid] : [b];
-    if (b === 1 && !loose) v.kind = 'draw';
+    // Com o empate como melhor, o conselho continua "torça pelo empate"; só vira "seque o outro" se a
+    // vitória do adversário dele for praticamente tão boa quanto.
+    if (b === 1 && good[mid] - good[w] < 0.75 * v.swing) v.kind = 'draw';
     else if (b === 1) {
       v.kind = 'help';
       v.dry = winner(w);

@@ -222,3 +222,39 @@ export function parseSummaryPlays(json) {
   }
   return out;
 }
+
+// "2025 Brasileiro Serie B" -> "Série B 2025"; "2025 CONMEBOL Libertadores" -> "Libertadores 2025".
+const COMPETITION = [
+  [/brasileiro serie a/i, 'Série A'], [/brasileiro serie b/i, 'Série B'], [/copa do brasil/i, 'Copa do Brasil'],
+  [/libertadores/i, 'Libertadores'], [/sudamericana|sul-americana/i, 'Sul-Americana'], [/supercopa/i, 'Supercopa'],
+];
+function competitionLabel(name) {
+  const text = String(name || '').trim();
+  const year = /\b(19|20)\d{2}\b/.exec(text)?.[0] || '';
+  const known = COMPETITION.find(([re]) => re.test(text))?.[1];
+  const label = known || text.replace(/\b(19|20)\d{2}\b/, '').trim();
+  return [label, year].filter(Boolean).join(' ');
+}
+
+/**
+ * Últimos confrontos entre os dois times, de qualquer competição, do mais recente para o mais antigo,
+ * sem o próprio jogo. Mata-mata decidido nos pênaltis vem com placar igual e um vencedor: pens = 'home' ou 'away'.
+ */
+export function parseHeadToHead(json, eventId) {
+  const series = (json?.seasonseries || []).find((s) => s.type === 'head-to-head');
+  const games = [];
+  for (const e of series?.events || []) {
+    if (String(e.id) === String(eventId) || e.statusType?.completed === false || e.status === 'pre') continue;
+    const side = (key) => {
+      const c = (e.competitors || []).find((x) => x.homeAway === key);
+      const score = c?.score === '' || c?.score == null ? null : Number(c.score);
+      return c ? { id: String(c.team?.id ?? ''), name: c.team?.displayName || '?', score, winner: !!c.winner } : null;
+    };
+    const home = side('home');
+    const away = side('away');
+    if (!home || !away || !Number.isFinite(home.score) || !Number.isFinite(away.score)) continue;
+    const pens = home.score === away.score ? (home.winner ? 'home' : away.winner ? 'away' : null) : null;
+    games.push({ id: String(e.id), date: new Date(e.date), competition: competitionLabel(e.competitionName), home, away, pens });
+  }
+  return games.sort((a, b) => b.date - a.date);
+}

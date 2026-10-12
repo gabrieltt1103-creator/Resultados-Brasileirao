@@ -4,7 +4,7 @@
 // time, escolha do time, status dos dados, texto para compartilhar) vem direto de ui.js.
 export * from './ui.js';
 import { crest, flowChart, formDots, miniTable, pct, scorers } from './ui.js';
-import { bucketLabels, flowNote, goalTimeNote, homeAwayNote, howItWent, statsReading, storyTags, tableLine } from './insights.js';
+import { bucketLabels, flowNote, goalTimeNote, h2hSummary, homeAwayNote, howItWent, statsReading, storyTags, tableLine } from './insights.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, weekdayShort } from './util.js';
 
 const ord = (n) => (n ? `${n}º` : '');
@@ -408,6 +408,24 @@ function statBars(ev, stats) {
     <div class="trk"><i class="h" style="flex:${h[k]}"></i><i class="a" style="flex:${a[k]}"></i></div></div>`).join('')}`;
 }
 
+// Últimos confrontos: o placar geral em três números e a lista, com quem perdeu em cinza.
+function h2hBlock(ev, games) {
+  const sum = h2hSummary(games, ev.home, ev.away);
+  if (!sum) return '';
+  const name = (t) => (t.id === ev.home.id ? ev.home.name : t.id === ev.away.id ? ev.away.name : t.name);
+  const tile = (n, text) => `<div><b>${n}</b><small>${esc(text)}</small></div>`;
+  const rows = games.map((g) => {
+    const hl = g.home.score < g.away.score;
+    const al = g.away.score < g.home.score;
+    return `<div class="v2-h2h"><span class="when">${esc(`${dm(g.date)}/${String(g.date.getFullYear()).slice(2)}`)}<small>${esc(g.competition)}</small></span>
+      <span class="game"><span class="h${hl ? ' lost' : ''}">${esc(name(g.home))}</span><b>${g.home.score}–${g.away.score}</b><span class="a${al ? ' lost' : ''}">${esc(name(g.away))}</span>
+      ${g.pens ? `<small>${esc(name(g[g.pens]))} venceu nos pênaltis</small>` : ''}</span></div>`;
+  }).join('');
+  return `<section class="v2-block"><h3>Últimos confrontos <small>${sum.n === 1 ? 'o último jogo' : `os últimos ${sum.n} jogos`}, em qualquer competição</small></h3>
+    <div class="v2-tally">${tile(sum.wins[ev.home.id], `${sum.wins[ev.home.id] === 1 ? 'vitória' : 'vitórias'} ${doo(ev.home.name)}`)}${tile(sum.draws, sum.draws === 1 ? 'empate' : 'empates')}${tile(sum.wins[ev.away.id], `${sum.wins[ev.away.id] === 1 ? 'vitória' : 'vitórias'} ${doo(ev.away.name)}`)}</div>
+    ${rows}${sum.streak ? `<p class="v2-cap">${esc(sum.streak)}</p>` : ''}</section>`;
+}
+
 /** Detalhe de um jogo. ctx: {table, scen, stats, statsLoading, formById, favorite, story, roundLabel, picks, zones, inFocus, now} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
@@ -445,5 +463,6 @@ export function matchSheet(ev, ctx) {
     ${s.kind !== 'post' ? `<button type="button" class="v2-btn dark wide" data-action="simulate" data-id="${esc(ev.id)}">Simular este jogo e ver a tabela</button>` : ''}
     ${stats ? `<section class="v2-block"><h3>Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="v2-cap muted center">Carregando estatísticas…</p>' : '')}
     ${lines.length ? `<section class="v2-block"><h3>Na tabela${s.kind === 'live' ? ' <small>se terminar assim</small>' : ''}</h3>${lines.map((l) => `<p class="v2-cap">${esc(l)}</p>`).join('')}</section>` : ''}
-    <section class="v2-block"><h3>Últimos 5 jogos</h3>${form(ev.home)}${form(ev.away)}</section>`;
+    <section class="v2-block"><h3>Últimos 5 jogos</h3>${form(ev.home)}${form(ev.away)}</section>
+    ${ctx.h2h?.length ? h2hBlock(ev, ctx.h2h) : ''}`;
 }

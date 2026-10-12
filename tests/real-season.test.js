@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { buildRounds, dropReplaced, pickDefault } from '../js/rounds.js';
-import { parseSummaryPlays } from '../js/espn.js';
-import { flowNote, liveClock, matchFlow } from '../js/insights.js';
+import { parseHeadToHead, parseSummaryPlays } from '../js/espn.js';
+import { flowNote, h2hSummary, liveClock, matchFlow } from '../js/insights.js';
 import { computeTable, reconcile } from '../js/table.js';
 
 const snap = JSON.parse(fs.readFileSync(new URL('./data/brasileirao-2026.json', import.meta.url)));
@@ -84,4 +84,28 @@ test('fluxo da partida pelo lance a lance', () => {
   assert.equal(ht.now, ht.half);
   // Poucos lances: sem gráfico.
   assert.equal(matchFlow(plays.slice(0, 8)), null);
+});
+
+// Últimos confrontos reais (ESPN, outubro de 2026), recortados.
+const confrontos = JSON.parse(fs.readFileSync(new URL('./data/confrontos-2026.json', import.meta.url)));
+
+test('últimos confrontos entre os dois times', () => {
+  const gre = { id: '6273', name: 'Grêmio' };
+  const cor = { id: '874', name: 'Corinthians' };
+  const games = parseHeadToHead(confrontos['gremio-corinthians'], '401841334');
+  assert.equal(games.length, 5);
+  assert.deepEqual(games.map((g) => g.competition), ['Série A 2026', 'Série A 2025', 'Série A 2025', 'Série A 2024', 'Copa do Brasil 2024']);
+  // Copa do Brasil 2024: 0 x 0 e o Corinthians passou nos pênaltis; no retrospecto conta como empate.
+  assert.equal(games[4].pens, 'away');
+  const sum = h2hSummary(games, gre, cor);
+  assert.deepEqual([sum.wins[gre.id], sum.draws, sum.wins[cor.id]], [0, 2, 3]);
+  assert.equal(sum.note, 'O Corinthians não perde para o Grêmio há 5 jogos. Nos últimos 5 confrontos: 3 vitórias do Corinthians e 2 empates.');
+  // Confronto com jogos da Série B e da Libertadores; o próprio jogo, quando já aconteceu, sai da lista.
+  const chape = parseHeadToHead(confrontos['chapecoense-athletico'], '401841265');
+  assert.ok(chape.some((g) => g.competition === 'Série B 2025'));
+  const fla = parseHeadToHead(confrontos['flamengo-palmeiras'], '401841322');
+  assert.ok(fla.some((g) => g.competition === 'Libertadores 2025'));
+  assert.equal(h2hSummary(fla, { id: '819', name: 'Flamengo' }, { id: '2029', name: 'Palmeiras' }).total, 'Nos últimos 5 confrontos: 3 vitórias do Flamengo, 1 vitória do Palmeiras e 1 empate.');
+  assert.equal(parseHeadToHead(confrontos['flamengo-palmeiras'], fla[0].id).length, 4);
+  assert.equal(h2hSummary([], gre, cor), null);
 });

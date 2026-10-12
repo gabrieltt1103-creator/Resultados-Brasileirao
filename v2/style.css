@@ -412,3 +412,18 @@ main { padding-top: 10px; }
 /* Fluxo da partida na v2: mandante em preto, visitante em cinza, fundo neutro */
 .flow-plot { background: linear-gradient(var(--surface-2) 50%, color-mix(in srgb, var(--surface-2) 55%, var(--surface)) 50%); }
 .v2-block .flow + .v2-cap { margin-top: 8px; }
+
+/* Últimos confrontos */
+.v2-tally { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 6px; text-align: center; }
+.v2-tally div + div { border-left: 1px solid var(--line); }
+.v2-tally b { display: block; font: 900 28px/1 var(--display); font-stretch: 110%; }
+.v2-tally small { display: block; margin-top: 4px; font: 500 12px/1.25 var(--body); color: var(--muted); }
+.v2-h2h { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 8px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.v2-h2h .when { font: 600 13px/1.2 var(--body); font-variant-numeric: tabular-nums; }
+.v2-h2h .when small { display: block; font: 500 11px/1.25 var(--body); color: var(--muted); }
+.v2-h2h .game { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; font: 700 14.5px/1.15 var(--body); font-stretch: 90%; }
+.v2-h2h .game .h { text-align: right; }
+.v2-h2h .game .h, .v2-h2h .game .a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-h2h .game .lost { color: var(--muted); font-weight: 600; }
+.v2-h2h .game b { min-width: 44px; padding: 4px 6px 3px; border-radius: 6px; background: var(--pill); text-align: center; font: 900 15px/1 var(--display); font-variant-numeric: tabular-nums; }
+.v2-h2h .game small { grid-column: 1 / -1; text-align: center; font: 500 11.5px/1.2 var(--body); color: var(--muted); }

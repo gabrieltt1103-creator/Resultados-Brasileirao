@@ -246,20 +246,24 @@ async function loadStandings() {
   state.lastStandings = Date.now();
 }
 
+// Resumo do jogo: estatísticas e lance a lance (jogos encerrados e ao vivo) e os últimos confrontos (todos).
 async function loadSummary(id, force = false) {
   const ev = state.events.get(id);
-  if (!ev || ev.status.kind === 'pre' || ev.status.kind === 'off') return;
+  if (!ev) return;
   const cached = state.summaries.get(id);
   if (cached?.loading) return;
-  if (cached && !force && (ev.status.kind === 'post' || Date.now() - cached.t < SUMMARY_MS)) return;
+  if (cached && !force && (ev.status.kind !== 'live' || Date.now() - cached.t < SUMMARY_MS)) return;
   state.summaries.set(id, { ...cached, loading: true });
   try {
     const json = await espn.fetchSummary(id);
     const stats = espn.parseSummaryStats(json);
     // Lance a lance, para o fluxo da partida (vem na mesma resposta das estatísticas).
     const plays = espn.parseSummaryPlays(json);
-    state.summaries.set(id, { stats, plays, t: Date.now() });
-    state.diag.summary = { t: Date.now(), ok: Object.keys(stats).length > 0, error: Object.keys(stats).length ? null : 'sem estatísticas' };
+    const h2h = espn.parseHeadToHead(json, id);
+    state.summaries.set(id, { stats, plays, h2h, t: Date.now() });
+    const played = ev.status.kind === 'live' || ev.status.kind === 'post';
+    const ok = !played || Object.keys(stats).length > 0;
+    state.diag.summary = { t: Date.now(), ok, error: ok ? null : 'sem estatísticas' };
   } catch (err) {
     state.summaries.set(id, { ...cached, loading: false, t: Date.now() });
     state.diag.summary = { t: Date.now(), ok: false, error: errText(err) };
@@ -730,6 +734,7 @@ function renderSheet() {
       statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
       formById: state.formById, favorite: state.favorite, story: matchStory(ev, inFocus ? preRank : null),
       roundLabel: roundName(state.roundOf.get(ev.id)), now, zones: state.zones, inFocus,
+      h2h: sum?.h2h || null,
       flow: sum?.plays?.length && (ev.status.kind === 'live' || ev.status.kind === 'post') ? matchFlow(sum.plays, liveClock(ev)) : null,
       picks: state.table && (ev.status.kind === 'pre' || ev.status.kind === 'live') ? matchPicks(currentModel(), ev) : null,
     });

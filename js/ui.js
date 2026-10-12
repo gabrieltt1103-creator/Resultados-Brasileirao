@@ -1,5 +1,5 @@
 // Montagem do HTML de cada parte da tela. Funções puras: recebem dados, devolvem texto.
-import { bucketLabels, flowNote, storyTags } from './insights.js';
+import { bucketLabels, flowNote, h2hSummary, storyTags } from './insights.js';
 import { distances, formPoints } from './table.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, shortDay, weekdayShort } from './util.js';
 
@@ -437,6 +437,24 @@ function scenarioBlock(ev, sc) {
   </section>`;
 }
 
+// Data curta de jogo antigo: "18/04/26".
+const dmy = (d) => `${dm(d)}/${String(d.getFullYear()).slice(2)}`;
+
+/** Últimos confrontos entre os dois times, de qualquer competição. */
+function h2hBlock(ev, games) {
+  const sum = h2hSummary(games, ev.home, ev.away);
+  if (!sum) return '';
+  const name = (t) => (t.id === ev.home.id ? ev.home.name : t.id === ev.away.id ? ev.away.name : t.name);
+  const rows = games.map((g) => {
+    const hw = g.home.score > g.away.score;
+    const aw = g.away.score > g.home.score;
+    return `<div class="h2h-row"><span class="h2h-when">${esc(dmy(g.date))}<small>${esc(g.competition)}</small></span>
+      <span class="h2h-game"><span class="h${hw ? ' w' : ''}">${esc(name(g.home))}</span><b>${g.home.score} x ${g.away.score}</b><span class="a${aw ? ' w' : ''}">${esc(name(g.away))}</span>
+      ${g.pens ? `<small>${esc(name(g[g.pens]))} venceu nos pênaltis</small>` : ''}</span></div>`;
+  }).join('');
+  return `<section class="sheet-block"><h3 class="sub-title">Últimos confrontos</h3>${rows}<p class="chart-note">${esc(sum.note)}</p></section>`;
+}
+
 function flowBlock(ev, flow) {
   const note = flowNote(flow, ev.home, ev.away, ev.status.kind === 'live');
   return `<section class="sheet-block">
@@ -482,7 +500,8 @@ export function matchSheet(ev, ctx) {
     <section class="sheet-block">
       <h3 class="sub-title">Últimos 5 jogos</h3>
       ${formRow(ev.home)}${formRow(ev.away)}
-    </section>`;
+    </section>
+    ${ctx.h2h?.length ? h2hBlock(ev, ctx.h2h) : ''}`;
 }
 
 /** Detalhe de um time. */

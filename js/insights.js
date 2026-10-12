@@ -514,3 +514,39 @@ export function flowNote(flow, home, away, live = false) {
   else if (H || A) parts.push(`O melhor momento ${doo((H ? home : away).name)} foi ${H || A}.`);
   return parts.join(' ');
 }
+
+// ---------- últimos confrontos ----------
+
+/**
+ * Retrospecto dos dois times nos últimos confrontos (games: parseHeadToHead).
+ * Empate nos 90 minutos conta como empate, mesmo que alguém tenha passado nos pênaltis.
+ * Devolve {n, wins: {id: n}, draws, note} ou null sem jogos.
+ */
+export function h2hSummary(games, home, away) {
+  if (!games?.length) return null;
+  const wins = { [home.id]: 0, [away.id]: 0 };
+  let draws = 0;
+  const winnerOf = (g) => (g.home.score > g.away.score ? g.home.id : g.away.score > g.home.score ? g.away.id : null);
+  for (const g of games) {
+    const w = winnerOf(g);
+    if (w == null) draws++;
+    else if (w in wins) wins[w]++;
+  }
+  // Sequência mais recente: vitórias seguidas ou jogos sem perder de um dos dois.
+  const streak = (id, ok) => { let n = 0; for (const g of games) { if (!ok(winnerOf(g), id)) break; n++; } return n; };
+  const name = { [home.id]: home.name, [away.id]: away.name };
+  const other = (id) => (id === home.id ? away.id : home.id);
+  let note = '';
+  for (const id of [home.id, away.id]) {
+    const won = streak(id, (w, x) => w === x);
+    const unbeaten = streak(id, (w, x) => w !== other(x));
+    if (won >= 3) { note = `${cap(o(name[id]))} venceu os últimos ${won} confrontos.`; break; }
+    if (unbeaten >= 3 && unbeaten > won && wins[id] > 0) { note = `${cap(o(name[id]))} não perde para ${o(name[other(id)])} há ${unbeaten} jogos.`; break; }
+  }
+  const n = games.length;
+  const tally = [home, away].filter((t) => wins[t.id]).map((t) => `${wins[t.id]} ${wins[t.id] === 1 ? 'vitória' : 'vitórias'} ${doo(t.name)}`);
+  if (draws) tally.push(`${draws} ${draws === 1 ? 'empate' : 'empates'}`);
+  const list = tally.length > 1 ? `${tally.slice(0, -1).join(', ')} e ${tally[tally.length - 1]}` : tally[0];
+  const total = `Nos últimos ${n === 1 ? 'confronto' : `${n} confrontos`}: ${list}.`;
+  return { n, wins, draws, streak: note, total, note: [note, total].filter(Boolean).join(' ') };
+}

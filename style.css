@@ -1138,3 +1138,15 @@ details[open] > summary::before { transform: rotate(45deg); }
 .flow-axis span { position: absolute; top: 3px; white-space: nowrap; }
 .flow-axis span:nth-child(2) { transform: translateX(-50%); }
 .flow-axis span:last-child { right: 0; }
+
+/* Últimos confrontos */
+.h2h-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; align-items: center; padding: 8px 0; }
+.h2h-row + .h2h-row { border-top: 1px solid var(--line); }
+.h2h-when { font-size: 13px; font-variant-numeric: tabular-nums; }
+.h2h-when small { display: block; color: var(--muted); font-size: 11px; line-height: 1.25; }
+.h2h-game { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; font-size: 14px; }
+.h2h-game .h { text-align: right; }
+.h2h-game .h, .h2h-game .a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.h2h-game .w { color: var(--ink); font-weight: 600; }
+.h2h-game b { font-family: var(--display); font-size: 17px; font-variant-numeric: tabular-nums; }
+.h2h-game small { grid-column: 1 / -1; text-align: center; color: var(--muted); font-size: 11.5px; }

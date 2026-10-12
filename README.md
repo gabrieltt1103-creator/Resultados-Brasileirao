@@ -61,6 +61,17 @@ Os dados vêm da API pública da ESPN (`site.api.espn.com`), chamada direto do n
 
 A ESPN não informa a rodada de cada jogo. O app usa o fato de que, no Brasileirão, a rodada r+19 repete a rodada r com o mando invertido: os dois jogos de cada confronto ficam no mesmo par de rodadas, então um jogo adiado, antecipado ou de rodada dividida é colocado na rodada certa pelo outro jogo do confronto. Conferido contra as rodadas oficiais (Cartola FC) de 2026: as 380 partidas na rodada certa. Quando a ESPN remarca um jogo adiado, ela cria um jogo novo e mantém o antigo como "adiado"; o app descarta o antigo. Sem a temporada completa, o app agrupa por datas (menos preciso com jogos remarcados).
 
+## Duas versões do visual
+
+O app tem duas aparências com os mesmos dados e a mesma lógica (tabela, rodadas, simulação, chances), para comparar qual funciona melhor:
+
+- **Versão atual**: `https://gabrieltt1103-creator.github.io/Resultados-Brasileirao/`
+- **Versão 2** ("Arquibancada"): `https://gabrieltt1103-creator.github.io/Resultados-Brasileirao/v2/`
+
+Na v2, a cor dos clubes aparece só num fio embaixo de cada time (cinza para quem perdeu), a tabela é uma lista só com a zona marcada no número da posição, o resumo vira frases puxadas por um número ("90+7'", "4–1", "Z4"), cada gráfico termina com uma frase que diz o que ele mostra, o simulador lista só o que muda na tabela e as chances por objetivo (título, G6, risco de cair), o detalhe do jogo conta como foi antes dos números, e as abas ficam embaixo, perto do polegar.
+
+Por dentro: `index.html` e `v2/index.html` carregam o mesmo `js/app.js`; o atributo `data-ui="v2"` da página faz o app usar `js/ui-v2.js` no lugar de `js/ui.js`. A v2 carrega o `style.css` da versão atual e o `v2/style.css` por cima, então as janelas que não mudaram (detalhe do time, status dos dados, escolha do time) ganham as cores novas sem duplicar código. As duas versões dividem os dados salvos no celular.
+
 ## Como abrir no celular
 
 O app é só HTML, CSS e JS estáticos, então o GitHub Pages hospeda de graça:
@@ -90,10 +101,11 @@ Não há build nem dependências: os módulos em `js/` rodam direto no navegador
 | `js/season.js` | Quais meses da temporada recarregar e o que a ESPN tirou da lista |
 | `js/rounds.js` | Monta as rodadas completas (inclusive jogos remarcados) e numera cada uma |
 | `js/table.js` | Tabela ao vivo, conferência com a classificação oficial, zonas, últimos 5 jogos, cenários e distâncias |
-| `js/insights.js` | Histórias dos jogos, manchetes da rodada, impacto da simulação e números |
+| `js/insights.js` | Histórias dos jogos, manchetes da rodada, impacto da simulação, números e as frases de resumo |
 | `js/sim.js`, `js/odds-worker.js` | Chances até o fim (Monte Carlo) e sorteio de placares |
 | `js/fx.js` | Som de gol, vibração e confete |
-| `js/ui.js` | Monta o HTML de cada parte da tela |
+| `js/ui.js` | Monta o HTML de cada parte da tela (versão atual) |
+| `js/ui-v2.js`, `v2/` | Versão 2 do visual: o que muda em relação ao `ui.js`, a página e o CSS |
 | `js/app.js` | Estado, atualização automática e interações |
 | `tests/` | Testes: temporada fictícia no formato da ESPN e retrato da temporada real de 2026 com as rodadas oficiais |
 

@@ -5,8 +5,10 @@ import { headlines, impactLines, lastGoal, matchStory, roundStats, scoreChange, 
 import { chances, matchPicks, model, suggestScore } from './sim.js';
 import { deltaMonths, vanished } from './season.js';
 import * as fx from './fx.js';
-import * as ui from './ui.js';
 import { HOUR, addDays, dayLabel, dm, doo, esc, fmtTime, o, sameDay, save, shortDay, store, ymd } from './util.js';
+
+// Aparência: a página escolhe (index.html usa a atual, v2/index.html a nova). Dados e lógica são os mesmos.
+const ui = await import(document.documentElement.dataset.ui === 'v2' ? './ui-v2.js' : './ui.js');
 
 const LIVE_MS = 30e3;            // com jogo rolando (ou prestes a começar)
 const IDLE_MS = 120e3;           // sem jogo agora
@@ -537,20 +539,15 @@ function renderGames() {
     counts[e.status.kind]++;
     if (e.status.kind === 'post' || e.status.kind === 'live') goals += (e.home.score ?? 0) + (e.away.score ?? 0);
   });
-  const parts = [`<b>${r.events.length}</b> jogos`];
-  if (counts.live) parts.push(`<b class="live-count">${counts.live}</b> <span class="live-count">ao vivo</span>`);
-  if (counts.post) parts.push(`<b>${counts.post}</b> ${counts.post === 1 ? 'encerrado' : 'encerrados'}`);
-  if (counts.pre) parts.push(`<b>${counts.pre}</b> a seguir`);
-  if (counts.off) parts.push(`<b>${counts.off}</b> ${counts.off === 1 ? 'adiado' : 'adiados'}`);
-  if (counts.live || counts.post) parts.push(`<b>${goals}</b> ${goals === 1 ? 'gol' : 'gols'}`);
-  if (!state.seasonComplete && state.seasonLoading) parts.push('<span class="muted">buscando o resto da temporada…</span>');
-  el.summary.innerHTML = parts.join(' · ');
+  el.summary.innerHTML = ui.roundSummary({ total: r.events.length, counts, goals, loading: !state.seasonComplete && state.seasonLoading });
   el.summary.hidden = false;
 
   const ctxBase = {
     rank: liveRank,
     delta: (id) => (isFocus ? state.table?.byId.get(id)?.delta || 0 : 0),
     favorite: state.favorite,
+    // Posição de cada time se ele vencer (usado pela v2 nos jogos ao vivo da rodada em andamento).
+    scenarios: isFocus && state.table ? (ev) => { try { return scenarios(state.ctx, ev); } catch { return null; } } : null,
   };
   // Zebra compara com a tabela de agora, então só vale na rodada em andamento.
   const card = (ev, note) => ui.matchCard(ev, { ...ctxBase, flash: takeFlash(ev.id), story: matchStory(ev, isFocus ? preRank : null), note });
@@ -558,11 +555,7 @@ function renderGames() {
   // Jogos de hoje que são de outras rodadas (remarcados), para não passarem despercebidos.
   const others = isFocus ? sortEvents(eventList()).filter((e) => !r.events.includes(e)
     && (e.status.kind === 'live' || (sameDay(e.date, now) && e.status.kind !== 'off'))) : [];
-  el.others.innerHTML = others.length ? `
-    <section class="day">
-      <h2 class="day-label">Hoje, de outras rodadas</h2>
-      ${others.map((e) => card(e, roundName(state.roundOf.get(e.id)))).join('')}
-    </section>` : '';
+  el.others.innerHTML = others.length ? ui.otherGames(others.map((e) => card(e, roundName(state.roundOf.get(e.id))))) : '';
 
   const days = [];
   for (const ev of r.events) {
@@ -570,11 +563,9 @@ function renderGames() {
     if (last && sameDay(last.date, ev.date)) last.events.push(ev);
     else days.push({ date: ev.date, events: [ev] });
   }
-  el.matches.innerHTML = days.map((d) => `
-    <section class="day">
-      <h2 class="day-label">${esc(dayLabel(d.date, now))}${d.events.every((e) => e.moved) ? ' <small>jogo remarcado</small>' : ''}</h2>
-      ${d.events.map((ev) => card(ev)).join('')}
-    </section>`).join('');
+  el.matches.innerHTML = ui.daySections(days.map((d) => ({
+    label: dayLabel(d.date, now), date: d.date, events: d.events, moved: d.events.every((e) => e.moved), cards: d.events.map((ev) => card(ev)),
+  })));
   el.share.hidden = false;
 }
 
@@ -679,7 +670,7 @@ function currentModel() {
 function renderStats() {
   const r = state.rounds[state.roundIdx];
   if (!r) { el.stats.innerHTML = ''; return; }
-  el.stats.innerHTML = ui.statsView({ roundLabel: roundName(r), st: roundStats(r), trends: state.trends, selectedBar: state.selectedBar, seasonAvg: seasonAverage() });
+  el.stats.innerHTML = ui.statsView({ roundLabel: roundName(r), st: roundStats(r), trends: state.trends, selectedBar: state.selectedBar, seasonAvg: seasonAverage(), open: !isFinished(r) });
 }
 
 // ---------- telas de detalhe ----------
@@ -735,7 +726,7 @@ function renderSheet() {
       table: state.table, scen, stats,
       statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
       formById: state.formById, favorite: state.favorite, story: matchStory(ev, inFocus ? preRank : null),
-      roundLabel: roundName(state.roundOf.get(ev.id)), now,
+      roundLabel: roundName(state.roundOf.get(ev.id)), now, zones: state.zones, inFocus,
       picks: state.table && (ev.status.kind === 'pre' || ev.status.kind === 'live') ? matchPicks(currentModel(), ev) : null,
     });
   } else if (spec.type === 'team') {

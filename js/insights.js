@@ -1,9 +1,12 @@
 // Leitura da rodada: histórias de cada jogo, manchetes e números.
 import { formOf, formPoints } from './table.js';
-import { ao, doo, kickoff, o, scoreText } from './util.js';
+import { ao, doo, kickoff, o, plural, scoreText } from './util.js';
 
 const started = (e) => (e.status.kind === 'post' || e.status.kind === 'live') && e.home.score != null && e.away.score != null;
 const ord = (n) => `${n}º`;
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const pts = (n) => `${n} ${n === 1 ? 'ponto' : 'pontos'}`;
+const scoreOf = (ev) => `${ev.home.score}–${ev.away.score}`;
 
 /** O que aconteceu de especial num jogo: virada, goleada, hat-trick, gol no fim, zebra. */
 export function matchStory(ev, rankOf) {
@@ -96,7 +99,8 @@ export function storyTags(s) {
  */
 export function headlines({ round, table, zones, focus, now = new Date() }) {
   const items = [];
-  const add = (prio, tag, text, ev, tone = 'gol') => items.push({ prio, tag, text, tone, ev: ev?.id || null, t: ev?.date?.getTime?.() || 0 });
+  // big: destaque curto da manchete (minuto, placar, sigla da zona), usado pela v2.
+  const add = (prio, tag, text, ev, tone = 'gol', big = '') => items.push({ prio, tag, text, tone, big, ev: ev?.id || null, t: ev?.date?.getTime?.() || 0 });
   const rankOf = table && focus ? (id) => table.preById.get(id)?.pos : null;
   const liveRank = table ? (id) => table.byId.get(id)?.pos : null;
 
@@ -108,10 +112,10 @@ export function headlines({ round, table, zones, focus, now = new Date() }) {
     const pending = (r, inside) => inside(table.settledPos.get(r.id)) !== inside(r.pos);
     if (pre[0].id !== leader.id) {
       const ifNow = pending(leader, (p) => p === 1);
-      add(10, 'Líder', ifNow ? `Se terminar assim, ${leader.name} assume a liderança` : `${leader.name} assumiu a liderança`, leader.result?.ev, 'good');
+      add(10, 'Líder', ifNow ? `Se terminar assim, ${leader.name} assume a liderança` : `${leader.name} assumiu a liderança`, leader.result?.ev, 'good', '1º');
     } else if (leader.result) {
       const gap = leader.pts - rows[1].pts;
-      add(6, 'Líder', `${leader.name} ${table.anyLive ? 'segue' : 'continua'} líder, ${gap} ${gap === 1 ? 'ponto' : 'pontos'} à frente ${doo(rows[1].name)}`, leader.result.ev, 'good');
+      add(6, 'Líder', `${leader.name} ${table.anyLive ? 'segue' : 'continua'} líder, ${gap} ${gap === 1 ? 'ponto' : 'pontos'} à frente ${doo(rows[1].name)}`, leader.result.ev, 'good', `${leader.pts} pts`);
     }
     const zoneMoves = (limit, inside, label, prio, tone) => {
       if (!limit) return;
@@ -123,7 +127,7 @@ export function headlines({ round, table, zones, focus, now = new Date() }) {
         const text = pending(r, inside)
           ? `Se terminar assim, ${r.name} ${enter ? 'entra no' : 'sai do'} ${label}`
           : `${r.name} ${enter ? 'entrou no' : 'saiu do'} ${label}`;
-        add(prio, label, text, r.result?.ev, tone);
+        add(prio, label, text, r.result?.ev, tone, label);
       }
     };
     zoneMoves(zones?.zStart, (p) => p >= zones.zStart, zones?.zLabel, 9, 'bad');
@@ -138,19 +142,19 @@ export function headlines({ round, table, zones, focus, now = new Date() }) {
     if (s.virada) {
       const { winner, loser } = s.virada;
       const sc = scoreText(Math.max(ev.home.score, ev.away.score), Math.min(ev.home.score, ev.away.score));
-      add(7, 'Virada', live ? `${winner.name} buscou a virada e vence ${o(loser.name)} por ${sc}` : `${winner.name} virou e venceu ${o(loser.name)} por ${sc}`, ev);
+      add(7, 'Virada', live ? `${winner.name} buscou a virada e vence ${o(loser.name)} por ${sc}` : `${winner.name} virou e venceu ${o(loser.name)} por ${sc}`, ev, 'gol', scoreOf(ev));
     }
     if (s.zebra) {
       const { winner, loser, wr, lr } = s.zebra;
-      add(7, 'Zebra', `${winner.name} (${ord(wr)}) ${live ? 'vence' : 'venceu'} ${o(loser.name)} (${ord(lr)})`, ev);
+      add(7, 'Zebra', `${winner.name} (${ord(wr)}) ${live ? 'vence' : 'venceu'} ${o(loser.name)} (${ord(lr)})`, ev, 'gol', scoreOf(ev));
     }
     if (s.late) {
       const { who, min, team, effect } = s.late;
-      add(6, 'Gol no fim', `${who || team.name} marcou aos ${min} e ${effect === 'empate' ? `garantiu o empate ${doo(team.name)}` : `deu a vitória ${ao(team.name)}`}`, ev);
+      add(6, 'Gol no fim', `${who || team.name} marcou aos ${min} e ${effect === 'empate' ? `garantiu o empate ${doo(team.name)}` : `deu a vitória ${ao(team.name)}`}`, ev, 'gol', min);
     }
-    for (const p of s.hattricks || []) add(6, 'Hat-trick', `${p.n === 3 ? 'Hat-trick' : `${p.n} gols`} de ${p.who} (${p.team.name})`, ev);
-    if (s.goleada) add(5, 'Goleada', live ? `Goleada em andamento: ${score}` : `Goleada: ${score}`, ev);
-    else if (s.maluco) add(4, 'Chuva de gols', `Jogo de ${ev.home.score + ev.away.score} gols: ${score}`, ev);
+    for (const p of s.hattricks || []) add(6, 'Hat-trick', `${p.n === 3 ? 'Hat-trick' : `${p.n} gols`} de ${p.who} (${p.team.name})`, ev, 'gol', `${p.n} gols`);
+    if (s.goleada) add(5, 'Goleada', live ? `Goleada em andamento: ${score}` : `Goleada: ${score}`, ev, 'gol', scoreOf(ev));
+    else if (s.maluco) add(4, 'Chuva de gols', `Jogo de ${ev.home.score + ev.away.score} gols: ${score}`, ev, 'gol', `${ev.home.score + ev.away.score} gols`);
   }
 
   // Prévia dos jogos que ainda vão acontecer.
@@ -160,16 +164,16 @@ export function headlines({ round, table, zones, focus, now = new Date() }) {
     const best = (filter, score) => upcoming.filter(filter).sort((x, y) => score(x) - score(y))[0];
     const big = best((e) => pos(e.home) <= 6 && pos(e.away) <= 6, (e) => pos(e.home) + pos(e.away));
     const prio = table.started ? 3 : 5;
-    if (big) add(prio, 'Jogão', `${big.home.name} (${ord(pos(big.home))}) x ${big.away.name} (${ord(pos(big.away))}), ${kickoff(big.date, now)}`, big, 'plain');
+    if (big) add(prio, 'Jogão', `${big.home.name} (${ord(pos(big.home))}) x ${big.away.name} (${ord(pos(big.away))}), ${kickoff(big.date, now)}`, big, 'plain', `${ord(pos(big.home))} x ${ord(pos(big.away))}`);
     const low = zones?.zStart ? zones.zStart - 2 : 15;
     const fight = best((e) => pos(e.home) >= low && pos(e.away) >= low, (e) => -(pos(e.home) + pos(e.away)));
-    if (fight) add(prio, 'Contra a queda', `${fight.home.name} (${ord(pos(fight.home))}) x ${fight.away.name} (${ord(pos(fight.away))}), ${kickoff(fight.date, now)}`, fight, 'plain');
+    if (fight) add(prio, 'Contra a queda', `${fight.home.name} (${ord(pos(fight.home))}) x ${fight.away.name} (${ord(pos(fight.away))}), ${kickoff(fight.date, now)}`, fight, 'plain', `${ord(pos(fight.home))} x ${ord(pos(fight.away))}`);
     if (!table.started) {
       const leader = table.rows[0];
       const g = upcoming.find((e) => e.home.id === leader.id || e.away.id === leader.id);
       if (g && g !== big) {
         const opp = g.home.id === leader.id ? g.away : g.home;
-        add(4, 'Líder', `Líder com ${leader.pts} pontos, ${o(leader.name)} pega ${o(opp.name)} (${ord(pos(opp))}) ${kickoff(g.date, now)}`, g, 'plain');
+        add(4, 'Líder', `Líder com ${leader.pts} pontos, ${o(leader.name)} pega ${o(opp.name)} (${ord(pos(opp))}) ${kickoff(g.date, now)}`, g, 'plain', `${leader.pts} pts`);
       }
     }
   }
@@ -231,6 +235,7 @@ export function roundStats(round) {
     }
   }
   st.avg = st.games ? st.goals / st.games : 0;
+  st.scorerCount = scorers.size;
   st.scorers = [...scorers.values()].sort((x, y) => y.n - x.n || x.ev.date - y.ev.date || x.first - y.first).slice(0, 6);
   return st;
 }
@@ -282,4 +287,110 @@ export function impactLines({ before, after, zones, favorite }) {
     add(9, 'Meu time', `${fav.name}: de ${favBefore.pos}º para ${fav.pos}º, com ${fav.pts} pontos`, 'plain');
   }
   return items.sort((x, y) => y.prio - x.prio).slice(0, 6);
+}
+
+// ---------- frases da v2: cada bloco termina dizendo o que o número mostra ----------
+
+/** Quem venceu mais na rodada. open: ainda há jogo por terminar. */
+export function homeAwayNote(st, open = false) {
+  if (!st.homeW && !st.draws && !st.awayW) return '';
+  const yet = open ? ' até agora' : '';
+  if (st.homeW && !st.awayW) return `Nenhum visitante venceu nesta rodada${yet}.`;
+  if (st.awayW && !st.homeW) return `Nenhum mandante venceu nesta rodada${yet}.`;
+  if (st.awayW > st.homeW) return 'Rodada boa para quem jogou fora de casa.';
+  if (st.draws >= st.homeW && st.draws >= st.awayW) return 'Rodada de muitos empates.';
+  if (st.homeW > st.awayW + st.draws) return 'Os mandantes dominaram a rodada.';
+  return 'Vantagem para os mandantes, como de costume.';
+}
+
+/** Em que momento saíram os gols (só com 4 ou mais gols com minuto). */
+export function goalTimeNote(st) {
+  const b = st.buckets;
+  const n = st.timed;
+  if (n < 4) return '';
+  const late = b[2] + b[5];
+  if (late / n >= 0.45) return `${late} dos ${n} gols saíram nos 15 minutos finais de cada tempo, contando os acréscimos.`;
+  const i = b.indexOf(Math.max(...b));
+  const [from, to] = BUCKETS[i].split('–');
+  return `O período com mais gols foi entre ${from} e ${to} minutos: ${plural(b[i], 'gol', 'gols')}.`;
+}
+
+/** O que chama atenção nas estatísticas do jogo, numa frase. stats: {teamId: {totalShots, ...}} */
+export function statsReading(ev, stats) {
+  const h = stats?.[ev.home.id];
+  const a = stats?.[ev.away.id];
+  if (!h || !a) return '';
+  const lead = (k) => {
+    if (!Number.isFinite(h[k]) || !Number.isFinite(a[k]) || h[k] === a[k]) return null;
+    return h[k] > a[k] ? [ev.home, h[k], a[k]] : [ev.away, a[k], h[k]];
+  };
+  const clauses = [];
+  const shots = lead('totalShots');
+  if (shots && shots[1] - shots[2] >= 5) clauses.push([shots[0], `finalizou ${shots[1] >= 2 * shots[2] ? 'mais que o dobro' : 'mais'} (${shots[1]} a ${shots[2]})`]);
+  const pos = lead('possessionPct');
+  if (pos && pos[1] >= 60) clauses.push([pos[0], `teve ${Math.round(pos[1])}% de posse de bola`]);
+  const cor = lead('wonCorners');
+  if (cor && cor[1] - cor[2] >= 5) clauses.push([cor[0], `teve ${cor[1]} escanteios contra ${cor[2]}`]);
+  if (!clauses.length) {
+    if (Number.isFinite(h.totalShots) && Number.isFinite(a.totalShots)) return `Jogo equilibrado nas finalizações: ${h.totalShots} ${doo(ev.home.name)} e ${a.totalShots} ${doo(ev.away.name)}.`;
+    return '';
+  }
+  const [first, second] = clauses;
+  if (second && second[0] === first[0]) {
+    const rest = first[1].startsWith('teve ') && second[1].startsWith('teve ') ? second[1].slice(5) : second[1];
+    return `${cap(o(first[0].name))} ${first[1]} e ${rest}.`;
+  }
+  return [first, second].filter(Boolean).map(([t, text]) => `${cap(o(t.name))} ${text}.`).join(' ');
+}
+
+const COUNT = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete'];
+
+/** Como foi o jogo, em até duas frases, pelos gols. */
+export function howItWent(ev, story = matchStory(ev)) {
+  const goals = ev.incidents.filter((i) => i.kind === 'goal');
+  if (!ev.goalsComplete || !goals.length || (ev.status.kind !== 'post' && ev.status.kind !== 'live')) return '';
+  const out = [];
+  const first = Math.min(...goals.map((g) => g.min.base ?? 0));
+  if (goals.length >= 2 && first >= 75) out.push(`Os ${COUNT[goals.length] || goals.length} gols saíram depois dos ${first} minutos.`);
+  const lastGoal = goals[goals.length - 1];
+  if (story.virada) {
+    const { winner, loser } = story.virada;
+    const opened = goals[0].team === loser.id;
+    const extra = lastGoal.min.base >= 90 && lastGoal.min.extra > 0 && lastGoal.team === winner.id ? ' nos acréscimos' : '';
+    out.push(`${cap(o(loser.name))} ${opened ? 'abriu o placar' : 'chegou a estar na frente'} e ${o(winner.name)} virou${extra}.`);
+  } else if (story.late) {
+    const { who, min, team, effect } = story.late;
+    out.push(`${who || team.name} marcou aos ${min} e ${effect === 'empate' ? `garantiu o empate ${doo(team.name)}` : `deu a vitória ${ao(team.name)}`}.`);
+  } else if (goals.length === 1 && goals[0].who) {
+    out.push(`${goals[0].who} marcou o único gol${ev.status.kind === 'live' ? ' até agora' : ''}, aos ${goals[0].min.label}.`);
+  }
+  return out.slice(0, 2).join(' ');
+}
+
+/** O que o resultado faz com o time na tabela (tabela ao vivo da rodada em andamento). */
+export function tableLine(id, table, zones) {
+  const r = table?.byId.get(id);
+  if (!r) return '';
+  const rows = table.rows;
+  const live = !!r.result?.live;
+  const verb = r.delta > 0 ? `${live ? 'sobe' : 'subiu'} para ${ord(r.pos)}`
+    : r.delta < 0 ? `${live ? 'cai' : 'caiu'} para ${ord(r.pos)}` : `${live ? 'fica' : 'segue'} em ${ord(r.pos)}`;
+  let extra = '';
+  const g = zones?.g;
+  const z = zones?.zStart;
+  if (r.pos === 1 && rows[1]) {
+    const gap = r.pts - rows[1].pts;
+    extra = gap ? `, ${pts(gap)} à frente ${doo(rows[1].name)}` : `, empatado em pontos com ${o(rows[1].name)}`;
+  } else if (z && r.pos >= z && rows[z - 2]) {
+    const gap = rows[z - 2].pts - r.pts;
+    extra = gap > 0 ? `, a ${pts(gap)} de sair do ${zones.zLabel}` : `, no ${zones.zLabel} pelos critérios de desempate`;
+  } else if (g && r.pos <= g && rows[g]) {
+    const lead = r.pts - rows[g].pts;
+    if (lead <= 3) extra = lead > 0 ? `, ${pts(lead)} acima do ${ord(g + 1)}` : `, com os mesmos pontos do ${ord(g + 1)}`;
+  } else if (g && r.pos > g) {
+    const gap = rows[g - 1].pts - r.pts;
+    if (gap <= 6) extra = gap > 0 ? `, a ${pts(gap)} do ${zones.gLabel}` : `, com os mesmos pontos do ${ord(g)}`;
+    else if (z && rows[z - 1] && r.pts - rows[z - 1].pts <= 4) extra = `, ${pts(r.pts - rows[z - 1].pts)} acima do ${zones.zLabel}`;
+  }
+  return `${cap(o(r.name))} ${verb}${extra}.`;
 }

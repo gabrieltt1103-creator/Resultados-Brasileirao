@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseEvent, parseStandings, parseSummaryStats } from '../js/espn.js';
 import { buildRounds, pickDefault } from '../js/rounds.js';
 import { computeTable, distances, finishedTable, formOf, reconcile, scenarios, zonesFor } from '../js/table.js';
-import { headlines, impactLines, lastGoal, matchStory, roundStats, scoreChange, trends } from '../js/insights.js';
+import { goalTimeNote, headlines, homeAwayNote, howItWent, impactLines, lastGoal, matchStory, roundStats, scoreChange, statsReading, tableLine, trends } from '../js/insights.js';
 import { deltaMonths, vanished } from '../js/season.js';
 import { statsView, tableCheck } from '../js/ui.js';
 import { chances, matchPicks, model, randomScore, rng, suggestScore } from '../js/sim.js';
@@ -252,4 +252,33 @@ test('média de gols da rodada comparada com a do campeonato', () => {
   const st = roundStats(focus);
   assert.match(statsView({ roundLabel: 'Rodada 30', st, trends: null, seasonAvg: st.avg + 0.6 }), /abaixo da média do campeonato/);
   assert.match(statsView({ roundLabel: 'Rodada 30', st, trends: null, seasonAvg: st.avg }), /na média do campeonato/);
+});
+
+test('frases da v2: destaque das manchetes, gráficos, estatísticas, como foi e tabela', () => {
+  const items = headlines({ round: focus, table, zones, focus: true, now: new Date(NOW) });
+  assert.ok(items.every((i) => typeof i.big === 'string'));
+  const late = items.find((i) => i.tag === 'Gol no fim');
+  assert.match(late.big, /^\d+(\+\d+)?'$/);
+  assert.ok(late.text.includes(`aos ${late.big}`));
+  assert.equal(homeAwayNote({ homeW: 5, draws: 3, awayW: 0 }, true), 'Nenhum visitante venceu nesta rodada até agora.');
+  assert.equal(homeAwayNote({ homeW: 2, draws: 4, awayW: 2 }), 'Rodada de muitos empates.');
+  assert.equal(goalTimeNote({ buckets: [0, 3, 4, 3, 3, 4], timed: 17 }), '8 dos 17 gols saíram nos 15 minutos finais de cada tempo, contando os acréscimos.');
+  assert.equal(goalTimeNote({ buckets: [1, 4, 1, 1, 0, 1], timed: 8 }), 'O período com mais gols foi entre 16 e 30 minutos: 4 gols.');
+
+  // Atlético-MG 2 x 1 Santos, rodada 30 de 2026: números reais da ESPN.
+  const t = (id, name) => ({ id, name, score: 0 });
+  const g = (team, base, extra, who) => ({ kind: 'goal', team, who, min: { base, extra, label: extra ? `${base}+${extra}'` : `${base}'`, sort: base + extra / 100 } });
+  const ev = { id: 'x', status: { kind: 'post' }, home: { ...t('cam', 'Atlético-MG'), score: 2 }, away: { ...t('san', 'Santos'), score: 1 }, goalsComplete: true,
+    incidents: [g('san', 88, 0, 'G. Barbosa'), g('cam', 90, 1, 'Vitor Hugo'), g('cam', 90, 7, 'Thiago Borbas')] };
+  const stats = { cam: { totalShots: 21, possessionPct: 50.2, wonCorners: 12 }, san: { totalShots: 10, possessionPct: 49.8, wonCorners: 3 } };
+  assert.equal(statsReading(ev, stats), 'O Atlético-MG finalizou mais que o dobro (21 a 10) e teve 12 escanteios contra 3.');
+  assert.equal(statsReading(ev, { cam: { totalShots: 12, possessionPct: 64 }, san: { totalShots: 11, possessionPct: 36 } }), 'O Atlético-MG teve 64% de posse de bola.');
+  assert.equal(howItWent(ev), 'Os três gols saíram depois dos 88 minutos. O Santos abriu o placar e o Atlético-MG virou nos acréscimos.');
+  const single = { ...ev, home: { ...ev.home, score: 1 }, away: { ...ev.away, score: 0 }, incidents: [g('cam', 65, 0, 'J. Carrascal')] };
+  assert.equal(howItWent(single), "J. Carrascal marcou o único gol, aos 65'.");
+
+  const leader = table.rows[0];
+  assert.match(tableLine(leader.id, table, zones), /^O .+ (segue|fica) em 1º, \d+ pontos? à frente d[oa] /);
+  const last = table.rows[table.rows.length - 1];
+  assert.match(tableLine(last.id, table, zones), /20º, a \d+ pontos? de sair do Z4\.$/);
 });

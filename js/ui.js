@@ -38,7 +38,7 @@ export function formDots(form) {
 }
 
 // "Pedro 23', 67' · Arrascaeta 51' (pên.)"
-function scorers(goals) {
+export function scorers(goals) {
   const byPlayer = new Map();
   for (const g of goals) {
     const key = `${g.who}|${g.og ? 'og' : ''}`;
@@ -89,6 +89,36 @@ export function matchCard(ev, ctx) {
       <div class="teams">${row(ev.home, 'home')}${row(ev.away, 'away')}</div>
       <div class="match-foot">${left}${ctx.note ? `<span class="foot-note">${esc(ctx.note)}</span>` : ev.moved ? `<span class="foot-note">${ev.status.kind === 'post' ? 'Jogo remarcado' : 'Remarcado'}</span>` : ''}</div>
     </article>`;
+}
+
+/** Linha de contagem da rodada: "10 jogos · 1 ao vivo · 7 encerrados · 2 a seguir · 17 gols". */
+export function roundSummary({ total, counts, goals, loading }) {
+  const parts = [`<b>${total}</b> jogos`];
+  if (counts.live) parts.push(`<b class="live-count">${counts.live}</b> <span class="live-count">ao vivo</span>`);
+  if (counts.post) parts.push(`<b>${counts.post}</b> ${counts.post === 1 ? 'encerrado' : 'encerrados'}`);
+  if (counts.pre) parts.push(`<b>${counts.pre}</b> a seguir`);
+  if (counts.off) parts.push(`<b>${counts.off}</b> ${counts.off === 1 ? 'adiado' : 'adiados'}`);
+  if (counts.live || counts.post) parts.push(`<b>${goals}</b> ${goals === 1 ? 'gol' : 'gols'}`);
+  if (loading) parts.push('<span class="muted">buscando o resto da temporada…</span>');
+  return parts.join(' · ');
+}
+
+/** Jogos de hoje que são de outras rodadas. cards: HTML de cada jogo. */
+export function otherGames(cards) {
+  return `
+    <section class="day">
+      <h2 class="day-label">Hoje, de outras rodadas</h2>
+      ${cards.join('')}
+    </section>`;
+}
+
+/** Jogos da rodada por dia. days: [{label, moved, cards}] */
+export function daySections(days) {
+  return days.map((d) => `
+    <section class="day">
+      <h2 class="day-label">${esc(d.label)}${d.moved ? ' <small>jogo remarcado</small>' : ''}</h2>
+      ${d.cards.join('')}
+    </section>`).join('');
 }
 
 export function newsCard(items, title) {
@@ -569,7 +599,7 @@ function simCard(ev, sim, mp) {
     </article>`;
 }
 
-function miniTable(sim, real, zones, favorite) {
+export function miniTable(sim, real, zones, favorite) {
   return `<table class="mini-table">
     <thead><tr><th>#</th><th></th><th class="club">Clube</th><th>P</th><th>J</th><th>SG</th></tr></thead>
     <tbody>${sim.rows.map((t) => {

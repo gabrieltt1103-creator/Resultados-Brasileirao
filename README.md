@@ -20,7 +20,7 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 - Classificação **ao vivo**: como fica se os jogos terminarem agora, com o resultado parcial de cada time e setas de movimento. Calculada a partir de todos os jogos da temporada; se faltarem jogos, usa a classificação oficial da ESPN corrigida com a rodada.
 - Pontos, jogos, V/E/D, saldo, gols pró e contra, aproveitamento e últimos 5 jogos. Nome e posição ficam fixos ao rolar para o lado.
 - Zonas de Libertadores, Sul-Americana e rebaixamento.
-- Toque num time para ver distância para o líder, para o G6 e para o Z4, o próximo jogo e os últimos resultados.
+- Toque num time para ver distância para o líder, para o G6 e para o Z4, os próximos 5 jogos (com rodada e posição de cada adversário) e os últimos resultados.
 
 **Simular**
 - Escolha placares para os jogos que faltam (com + e −, ou nos botões de vitória e empate) e veja a tabela mudar na hora, com quem sobe, quem cai e quem entra ou sai do G6 e do Z4.

@@ -379,7 +379,7 @@ export function matchSheet(ev, ctx) {
 }
 
 /** Detalhe de um time. */
-export function teamSheet({ team, row, table, zones, form, upcoming, favorite, odds }) {
+export function teamSheet({ team, row, table, zones, form, upcoming = [], favorite, odds, rankOf = () => null, roundOf = () => null }) {
   const isFav = team.id === favorite;
   const zone = row ? zones.byPos[row.pos] : null;
   const pct = row?.gp ? Math.round((row.pts / (row.gp * 3)) * 100) : 0;
@@ -403,18 +403,39 @@ export function teamSheet({ team, row, table, zones, form, upcoming, favorite, o
       <div class="odds">${oddsTiles(odds, zones)}</div></section>` : ''}
     ${dist.length ? `<section class="sheet-block"><h3 class="sub-title">Distâncias${table.anyLive ? ' <small>com os placares atuais</small>' : ''}</h3>
       <dl class="dist">${dist.map((d) => `<div><dt>${esc(d.label)}</dt><dd>${esc(d.value)}</dd></div>`).join('')}</dl></section>` : ''}
-    ${upcoming ? `<section class="sheet-block"><h3 class="sub-title">${upcoming.status.kind === 'live' ? 'Jogando agora' : 'Próximo jogo'}</h3>
-      <button type="button" class="game-row" data-match="${esc(upcoming.id)}">
-        <span class="gr-date">${upcoming.status.kind === 'live' ? `<span class="live-text">${esc(upcoming.status.label)}</span>` : esc(`${shortDay(upcoming.date)} ${fmtTime.format(upcoming.date)}`)}</span>
-        ${gameOpp(upcoming, team.id)}
-        <span class="gr-score">${upcoming.status.kind === 'live' ? `${upcoming.home.score} x ${upcoming.away.score}` : ''}</span>
-      </button></section>` : ''}
+    ${upcoming.length ? `<section class="sheet-block"><h3 class="sub-title">Próximos jogos${nextSummary(upcoming, team.id, rankOf)}</h3>
+      ${upcoming.map((e) => nextRow(e, team.id, rankOf, roundOf(e))).join('')}
+    </section>` : ''}
     ${games.length ? `<section class="sheet-block"><h3 class="sub-title">Últimos jogos <small>${formPoints(form)} de ${form.length * 3} pontos</small></h3>
       ${games.map((g) => `<button type="button" class="game-row" data-match="${esc(g.ev.id)}">
         <span class="gr-date">${esc(dm(g.ev.date))}</span>${gameOpp(g.ev, team.id)}
         <span class="gr-score">${g.gf} x ${g.ga}</span><i class="f f-${g.res}">${g.res}</i>
       </button>`).join('')}
     </section>` : ''}`;
+}
+
+// "média dos adversários: 9º · 3 em casa"
+function nextSummary(games, teamId, rankOf) {
+  const ranks = games.map((e) => rankOf(e.home.id === teamId ? e.away.id : e.home.id)).filter(Boolean);
+  const home = games.filter((e) => e.home.id === teamId).length;
+  const parts = [];
+  if (ranks.length) parts.push(`adversários em média ${Math.round(ranks.reduce((a, b) => a + b, 0) / ranks.length)}º`);
+  parts.push(`${home} em casa`);
+  return ` <small>${esc(parts.join(' · '))}</small>`;
+}
+
+function nextRow(e, teamId, rankOf, round) {
+  const opp = e.home.id === teamId ? e.away : e.home;
+  const rank = rankOf(opp.id);
+  let when;
+  if (e.status.kind === 'live') when = `<span class="live-text">${esc(e.status.label)}</span><small>ao vivo</small>`;
+  else if (e.status.kind === 'off') when = `${esc(e.status.label)}<small>sem nova data</small>`;
+  else when = `${esc(shortDay(e.date))}<small>${esc(fmtTime.format(e.date))}${round?.number ? ` · R${round.number}` : ''}</small>`;
+  return `<button type="button" class="game-row next-row" data-match="${esc(e.id)}">
+    <span class="gr-date">${when}</span>
+    ${gameOpp(e, teamId)}
+    <span class="gr-score">${e.status.kind === 'live' ? `${e.home.score} x ${e.away.score}` : rank ? `<span class="gr-rank">${rank}º</span>` : ''}</span>
+  </button>`;
 }
 
 function gameOpp(ev, teamId) {

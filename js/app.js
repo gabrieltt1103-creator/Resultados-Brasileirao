@@ -602,12 +602,17 @@ function renderSheet() {
   } else if (spec.type === 'team') {
     const team = allTeams().find((t) => t.id === spec.id);
     if (!team) { closeSheet(); return; }
-    const upcoming = sortEvents(list).find((e) => playsIn(e, spec.id)
-      && (e.status.kind === 'live' || (e.status.kind === 'pre' && e.date > now - 3 * HOUR)));
+    // Próximos 5 jogos (o que está rolando primeiro); adiados ainda sem data vêm no fim.
+    const mine = sortEvents(list).filter((e) => playsIn(e, spec.id));
+    const upcoming = [
+      ...mine.filter((e) => e.status.kind === 'live' || (e.status.kind === 'pre' && e.date > now - 3 * HOUR)),
+      ...mine.filter((e) => e.status.kind === 'off'),
+    ].slice(0, 5);
     html = ui.teamSheet({
       team, row: state.table?.byId.get(spec.id), table: state.table, zones: state.zones,
       form: state.formById.get(spec.id) || formOf(list, spec.id), upcoming, favorite: state.favorite,
       odds: state.oddsBase?.byId.get(spec.id) || null,
+      rankOf: liveRank, roundOf: (e) => state.roundOf.get(e.id),
     });
   } else if (spec.type === 'picker') {
     html = ui.teamPicker(allTeams(), state.favorite);

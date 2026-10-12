@@ -838,6 +838,9 @@ main {
   cursor: pointer;
 }
 .gr-date { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.next-row .gr-date { display: grid; color: var(--ink); font-weight: 500; }
+.next-row .gr-date small { color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.gr-rank { font-size: 12.5px; font-weight: 600; color: var(--muted); }
 .gr-opp { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
 .gr-opp small { color: var(--muted); width: 48px; flex: none; }
 .gr-score { font-weight: 600; font-variant-numeric: tabular-nums; }

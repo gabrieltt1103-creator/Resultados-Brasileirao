@@ -1,5 +1,5 @@
 // Montagem do HTML de cada parte da tela. Funções puras: recebem dados, devolvem texto.
-import { bucketLabels, storyTags } from './insights.js';
+import { bucketLabels, flowNote, storyTags } from './insights.js';
 import { distances, formPoints } from './table.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, shortDay, weekdayShort } from './util.js';
 
@@ -322,6 +322,32 @@ function fact(label, ev) {
 
 // ---------- telas de detalhe ----------
 
+/**
+ * Fluxo da partida: pressão de cada time minuto a minuto (mandante para cima, visitante para baixo),
+ * com os gols e o intervalo; num jogo ao vivo, o que ainda não aconteceu fica apagado.
+ */
+export function flowChart(flow, ev, note = '') {
+  const W = flow.slots * 4;
+  const max = Math.max(1.6, ...flow.net.map(Math.abs));
+  const bars = flow.net.map((v, i) => {
+    const h = (Math.abs(v) / max) * 46;
+    if (h < 0.6) return '';
+    return `<rect class="${v > 0 ? 'h' : 'a'}" x="${i * 4 + 0.5}" y="${(v > 0 ? 50 - h : 50).toFixed(1)}" width="3" height="${h.toFixed(1)}" rx="0.8"/>`;
+  }).join('');
+  const at = (i) => `${((i / flow.slots) * 100).toFixed(2)}%`;
+  const now = flow.now != null
+    ? `<rect class="future" x="${flow.now * 4}" y="0" width="${W - flow.now * 4}" height="100"/><rect class="now" x="${flow.now * 4 - 0.75}" y="0" width="1.5" height="100"/>`
+    : '';
+  return `<div class="flow" role="img" aria-label="${esc(`Fluxo da partida. ${note}`)}">
+    <div class="flow-teams" aria-hidden="true">${crest(ev.home.logo, ev.home.name, 18, 'mini')}${crest(ev.away.logo, ev.away.name, 18, 'mini')}</div>
+    <div class="flow-plot">
+      <svg viewBox="0 0 ${W} 100" preserveAspectRatio="none" aria-hidden="true"><rect class="mid" x="0" y="49.6" width="${W}" height="0.8"/>${bars}<rect class="ht" x="${flow.half * 4 - 0.75}" y="0" width="1.5" height="100"/>${now}</svg>
+      ${flow.goals.map((g) => `<i class="flow-goal ${g.side === 'home' ? 'h' : 'a'}" style="left:${at(g.i + 0.5)}"></i>`).join('')}
+    </div>
+    <div class="flow-axis" aria-hidden="true"><span>0'</span><span style="left:${at(flow.half)}">intervalo</span><span>${esc(flow.label(flow.slots - 1))}</span></div>
+  </div>`;
+}
+
 const STAT_DEFS = [
   ['possessionPct', 'Posse de bola', (v) => `${Math.round(v)}%`],
   ['totalShots', 'Finalizações'],
@@ -411,6 +437,15 @@ function scenarioBlock(ev, sc) {
   </section>`;
 }
 
+function flowBlock(ev, flow) {
+  const note = flowNote(flow, ev.home, ev.away, ev.status.kind === 'live');
+  return `<section class="sheet-block">
+    <h3 class="sub-title">Fluxo da partida <small>chutes, escanteios e faltas perto da área</small></h3>
+    ${flowChart(flow, ev, note)}
+    ${note ? `<p class="chart-note">${esc(note)}</p>` : ''}
+  </section>`;
+}
+
 /** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, picks, now} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
@@ -439,6 +474,7 @@ export function matchSheet(ev, ctx) {
     <p class="sh-meta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="tags center">${tags.map((t) => `<b class="tag tone-gol">${esc(t)}</b>`).join('')}</p>` : ''}
     ${ev.incidents.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev)}</section>` : ''}
+    ${ctx.flow ? flowBlock(ev, ctx.flow) : ''}
     ${stats ? `<section class="sheet-block"><h3 class="sub-title">Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="chart-note center">Carregando estatísticas…</p>' : '')}
     ${oddsBlock(ev, ctx.picks)}
     ${scenarioBlock(ev, ctx.scen)}

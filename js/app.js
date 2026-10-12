@@ -1,7 +1,7 @@
 import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
-import { headlines, impactLines, lastGoal, matchStory, roundStats, scoreChange, trends } from './insights.js';
+import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { chances, matchPicks, model, suggestScore } from './sim.js';
 import { deltaMonths, vanished } from './season.js';
 import * as fx from './fx.js';
@@ -254,8 +254,11 @@ async function loadSummary(id, force = false) {
   if (cached && !force && (ev.status.kind === 'post' || Date.now() - cached.t < SUMMARY_MS)) return;
   state.summaries.set(id, { ...cached, loading: true });
   try {
-    const stats = espn.parseSummaryStats(await espn.fetchSummary(id));
-    state.summaries.set(id, { stats, t: Date.now() });
+    const json = await espn.fetchSummary(id);
+    const stats = espn.parseSummaryStats(json);
+    // Lance a lance, para o fluxo da partida (vem na mesma resposta das estatísticas).
+    const plays = espn.parseSummaryPlays(json);
+    state.summaries.set(id, { stats, plays, t: Date.now() });
     state.diag.summary = { t: Date.now(), ok: Object.keys(stats).length > 0, error: Object.keys(stats).length ? null : 'sem estatísticas' };
   } catch (err) {
     state.summaries.set(id, { ...cached, loading: false, t: Date.now() });
@@ -727,6 +730,7 @@ function renderSheet() {
       statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
       formById: state.formById, favorite: state.favorite, story: matchStory(ev, inFocus ? preRank : null),
       roundLabel: roundName(state.roundOf.get(ev.id)), now, zones: state.zones, inFocus,
+      flow: sum?.plays?.length && (ev.status.kind === 'live' || ev.status.kind === 'post') ? matchFlow(sum.plays, liveClock(ev)) : null,
       picks: state.table && (ev.status.kind === 'pre' || ev.status.kind === 'live') ? matchPicks(currentModel(), ev) : null,
     });
   } else if (spec.type === 'team') {

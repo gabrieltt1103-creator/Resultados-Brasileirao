@@ -16,6 +16,7 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 - Lance a lance com gols e cartões, estatísticas (posse, finalizações, chutes no gol, escanteios, faltas…) e os últimos 5 jogos de cada time.
 - **Chances pelo modelo**: vitória de cada time e empate, com o placar sugerido (num jogo ao vivo, a partir do placar atual).
 - **O que está em jogo**: em que posição cada time fica se vencer, empatar ou perder, considerando os outros placares do momento.
+- **Fluxo da partida**: quem estava pressionando em cada minuto, com barras para cima (mandante) e para baixo (visitante), os gols e, ao vivo, o minuto atual. Vem do lance a lance da ESPN (na mesma resposta das estatísticas): cada lance de ataque soma para quem atacou (gol 1,5; chute no gol ou na trave 1; para fora 0,6; bloqueado 0,5; escanteio 0,4; falta sofrida perto da área 0,25; impedimento 0,2) e pesa também, cada vez menos, nos 4 minutos seguintes. Uma frase diz quem pressionou mais e o melhor momento do outro time. Diferente dos gráficos que usam todos os toques na bola, mostra a pressão pelas chances criadas, então há minutos sem barra quando nada aconteceu.
 
 **Tabela**
 - Classificação **ao vivo**: como fica se os jogos terminarem agora, com o resultado parcial de cada time e setas de movimento. Calculada a partir de todos os jogos da temporada; se faltarem jogos, usa a classificação oficial da ESPN corrigida com a rodada. A nota no topo diz quantos jogos da rodada já entraram e quantos faltam.

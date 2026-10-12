@@ -408,3 +408,7 @@ main { padding-top: 10px; }
   .v2-head .updated b { display: none; }
   .v2-head .updated small { margin-left: 0; }
 }
+
+/* Fluxo da partida na v2: mandante em preto, visitante em cinza, fundo neutro */
+.flow-plot { background: linear-gradient(var(--surface-2) 50%, color-mix(in srgb, var(--surface-2) 55%, var(--surface)) 50%); }
+.v2-block .flow + .v2-cap { margin-top: 8px; }

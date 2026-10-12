@@ -394,3 +394,123 @@ export function tableLine(id, table, zones) {
   }
   return `${cap(o(r.name))} ${verb}${extra}.`;
 }
+
+// ---------- fluxo da partida ----------
+
+// Peso de cada lance de ataque para o time que atacou.
+const FLOW_W = {
+  goal: 1.5, 'goal---header': 1.5, 'goal---volley': 1.5, 'goal---free-kick': 1.5, 'penalty---scored': 1.5, 'own-goal': 1.2,
+  'shot-on-target': 1, 'shot-hit-woodwork': 1, 'penalty---saved': 1, 'deleted-after-review': 1,
+  'shot-off-target': 0.6, 'penalty---missed': 0.6, 'shot-blocked': 0.5,
+  'corner-awarded': 0.4, offside: 0.2,
+};
+const FLOW_FOUL = 0.25;                       // falta sofrida perto da área adversária
+const FLOW_KERNEL = [1, 0.7, 0.45, 0.25, 0.1]; // um lance pesa no minuto dele e, cada vez menos, nos 4 seguintes
+const FLOW_GOAL = /^(goal|own-goal|penalty---scored)/;
+
+/** Relógio de um jogo ao vivo no formato do lance a lance: {period, base, extra}. */
+export function liveClock(ev) {
+  if (ev?.status?.kind !== 'live') return null;
+  if (ev.status.half) return { period: 1, base: 45, extra: 99 };
+  const m = /(\d+)'?\s*(?:\+\s*(\d+))?/.exec(ev.status.label || '');
+  if (!m) return null;
+  const base = Number(m[1]);
+  return { period: base > 45 ? 2 : 1, base, extra: Number(m[2] || 0) };
+}
+
+/**
+ * Pressão de cada time minuto a minuto, pelo lance a lance (chutes, escanteios, faltas perto da área).
+ * Cada minuto mostra a diferença entre os dois: positivo para o mandante, negativo para o visitante.
+ * now: relógio do jogo ao vivo (liveClock). Devolve null quando há poucos lances.
+ */
+export function matchFlow(plays, now = null) {
+  if (!plays?.length) return null;
+  let stop1 = 0;
+  let stop2 = 0;
+  const used = [];
+  const fouls = new Set();
+  for (const p of plays) {
+    if (p.period === 1 && p.base >= 45) stop1 = Math.max(stop1, p.extra);
+    if (p.period === 2 && p.base >= 90) stop2 = Math.max(stop2, p.extra);
+    if (p.side !== 'home' && p.side !== 'away') continue;
+    let w = FLOW_W[p.type] || 0;
+    let side = p.side;
+    if (p.type === 'foul') {
+      // A ESPN registra a falta duas vezes, com o time de quem fez a falta; quem sofreu é quem ataca.
+      const key = `${p.t}|${p.side}`;
+      if (fouls.has(key) || p.x == null || p.x > 30) { fouls.add(key); continue; }
+      fouls.add(key);
+      side = p.side === 'home' ? 'away' : 'home';
+      w = FLOW_FOUL;
+    }
+    if (w) used.push({ ...p, side, w });
+  }
+  if (now?.period === 1 && now.base >= 45 && now.extra < 99) stop1 = Math.max(stop1, now.extra);
+  if (now?.period === 2 && now.base >= 90) stop2 = Math.max(stop2, now.extra);
+  if (used.length < 6) return null;
+  const half = 45 + stop1;
+  const slots = half + 45 + stop2;
+  const slotOf = (p) => {
+    const i = p.period === 1 ? Math.min(p.base, 45) + Math.min(p.extra, stop1) : half + Math.min(Math.max(p.base, 46), 90) - 45 + p.extra;
+    return Math.max(0, Math.min(slots - 1, i - 1));
+  };
+  const raw = { home: new Float64Array(slots), away: new Float64Array(slots) };
+  const goals = [];
+  for (const p of used) {
+    const i = slotOf(p);
+    raw[p.side][i] += p.w;
+    if (FLOW_GOAL.test(p.type)) goals.push({ i, side: p.side });
+  }
+  const wave = (a, i) => {
+    const start = i < half ? 0 : half; // o intervalo zera a onda
+    let s = 0;
+    for (let j = 0; j < FLOW_KERNEL.length && i - j >= start; j++) s += FLOW_KERNEL[j] * a[i - j];
+    return s;
+  };
+  let nowSlot = null;
+  if (now) nowSlot = now.extra === 99 ? half : slotOf(now) + 1;
+  const net = Array.from({ length: slots }, (_, i) => (nowSlot != null && i >= nowSlot ? 0 : wave(raw.home, i) - wave(raw.away, i)));
+  const label = (i) => {
+    const m = i < half ? i + 1 : 46 + (i - half);
+    return i < half ? (m <= 45 ? `${m}'` : `45+${m - 45}'`) : (m <= 90 ? `${m}'` : `90+${m - 90}'`);
+  };
+  return { slots, half, net, goals, now: nowSlot, plays: used.length, label };
+}
+
+/** Leitura do fluxo numa frase: quem pressionou mais e o melhor momento de cada time. */
+export function flowNote(flow, home, away, live = false) {
+  if (!flow) return '';
+  let pos = 0;
+  let neg = 0;
+  for (const v of flow.net) { if (v > 0) pos += v; else neg -= v; }
+  if (pos + neg < 2) return '';
+  // Janela de 10 minutos com mais pressão do time, apertada nos minutos em que ela aparece de fato.
+  const best = (sign) => {
+    let top = 0;
+    let start = -1;
+    for (let s = 0; s + 10 <= flow.slots; s++) {
+      let sum = 0;
+      for (let i = s; i < s + 10; i++) sum += Math.max(0, sign * flow.net[i]);
+      if (sum > top) { top = sum; start = s; }
+    }
+    if (start < 0 || top < 1.5) return null;
+    let a = start;
+    let b = start + 9;
+    const peak = Math.max(...flow.net.slice(a, b + 1).map((v) => sign * v));
+    while (a < b && sign * flow.net[a] < 0.2 * peak) a++;
+    while (b > a && sign * flow.net[b] < 0.2 * peak) b--;
+    return b - a <= 2 ? `por volta dos ${flow.label(a)}` : `entre ${flow.label(a)} e ${flow.label(b)}`;
+  };
+  const share = pos / (pos + neg);
+  const H = best(1);
+  const A = best(-1);
+  const yet = live ? ' até agora' : '';
+  if (share >= 0.62 || share <= 0.38) {
+    const [lead, other, otherBest] = share >= 0.62 ? [home, away, A] : [away, home, H];
+    return `${cap(o(lead.name))} pressionou mais${yet}. ${otherBest ? `O melhor momento ${doo(other.name)} foi ${otherBest}.` : `${cap(o(other.name))} quase não levou perigo.`}`;
+  }
+  const parts = [`Jogo equilibrado${yet}.`];
+  if (H && A) parts.push(`O melhor momento ${doo(home.name)} foi ${H}; o ${doo(away.name)}, ${A}.`);
+  else if (H || A) parts.push(`O melhor momento ${doo((H ? home : away).name)} foi ${H || A}.`);
+  return parts.join(' ');
+}

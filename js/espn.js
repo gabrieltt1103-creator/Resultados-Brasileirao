@@ -193,3 +193,32 @@ export function parseSummaryStats(json) {
   }
   return out;
 }
+
+/**
+ * Lance a lance do resumo do jogo, para o fluxo da partida: [{type, side, period, base, extra, x, t}].
+ * side: 'home' ou 'away' (null em lances sem time, como o apito inicial); x: posição no campo no
+ * sentido do ataque de quem fez o lance (0 = o próprio gol, 100 = o gol adversário).
+ */
+export function parseSummaryPlays(json) {
+  const side = new Map();
+  for (const c of json?.header?.competitions?.[0]?.competitors || []) if (c.team?.displayName) side.set(c.team.displayName, c.homeAway);
+  if (side.size !== 2) return [];
+  const out = [];
+  for (const x of json?.commentary || []) {
+    const p = x.play;
+    const type = p?.type?.type;
+    const m = /(\d+)'(?:\+(\d+))?/.exec(x.time?.displayValue || p?.clock?.displayValue || '');
+    if (!type || !m) continue;
+    const base = Number(m[1]);
+    out.push({
+      type,
+      side: side.get(p.team?.displayName) || null,
+      period: p.period?.number || (base > 45 ? 2 : 1),
+      base,
+      extra: Number(m[2] || 0),
+      x: Number.isFinite(p.fieldPositionX) ? p.fieldPositionX : null,
+      t: x.time?.value ?? null,
+    });
+  }
+  return out;
+}

@@ -1116,3 +1116,25 @@ details[open] > summary::before { transform: rotate(45deg); }
   z-index: 40;
   box-shadow: 0 0 0 100vmax rgba(5, 15, 10, 0.55);
 }
+
+/* Fluxo da partida: barras de pressão por minuto, mandante para cima e visitante para baixo */
+.flow { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 8px; }
+.flow-teams { display: grid; grid-template-rows: 1fr 1fr; place-items: center; height: 96px; }
+.flow-plot {
+  position: relative; height: 96px; border-radius: 6px; overflow: hidden;
+  background: linear-gradient(color-mix(in srgb, var(--home) 7%, var(--surface)) 50%, color-mix(in srgb, var(--away) 7%, var(--surface)) 50%);
+}
+.flow-plot svg { display: block; width: 100%; height: 100%; }
+.flow .h { fill: var(--home); }
+.flow .a { fill: var(--away); }
+.flow .mid { fill: var(--line); }
+.flow .ht { fill: var(--muted); opacity: 0.45; }
+.flow .now { fill: var(--live); }
+.flow .future { fill: var(--surface); opacity: 0.65; }
+.flow-goal { position: absolute; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 2px var(--ink); }
+.flow-goal.h { top: 3px; }
+.flow-goal.a { bottom: 3px; }
+.flow-axis { grid-column: 2; position: relative; height: 16px; font-size: 11px; color: var(--muted); }
+.flow-axis span { position: absolute; top: 3px; white-space: nowrap; }
+.flow-axis span:nth-child(2) { transform: translateX(-50%); }
+.flow-axis span:last-child { right: 0; }

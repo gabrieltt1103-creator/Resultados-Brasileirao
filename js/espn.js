@@ -199,6 +199,10 @@ export function parseSummaryStats(json) {
  * side: 'home' ou 'away' (null em lances sem time, como o apito inicial); x: posição no campo no
  * sentido do ataque de quem fez o lance (0 = o próprio gol, 100 = o gol adversário).
  */
+// Ao vivo, a ESPN publica o chute mais recente como "temp-attempt" e só depois o reclassifica;
+// o texto já diz o que foi ("Attempt blocked.", "Attempt saved.", "Attempt missed.").
+const TEMP_ATTEMPT = [[/^attempt blocked/i, 'shot-blocked'], [/^attempt saved/i, 'shot-on-target'], [/(hits? the (bar|post|crossbar))|woodwork/i, 'shot-hit-woodwork'], [/^attempt missed/i, 'shot-off-target']];
+
 export function parseSummaryPlays(json) {
   const side = new Map();
   for (const c of json?.header?.competitions?.[0]?.competitors || []) if (c.team?.displayName) side.set(c.team.displayName, c.homeAway);
@@ -206,7 +210,8 @@ export function parseSummaryPlays(json) {
   const out = [];
   for (const x of json?.commentary || []) {
     const p = x.play;
-    const type = p?.type?.type;
+    let type = p?.type?.type;
+    if (type === 'temp-attempt') type = TEMP_ATTEMPT.find(([re]) => re.test(x.text || p?.text || ''))?.[1] || type;
     const m = /(\d+)'(?:\+(\d+))?/.exec(x.time?.displayValue || p?.clock?.displayValue || '');
     if (!type || !m) continue;
     const base = Number(m[1]);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseEvent, parseStandings, parseSummaryStats } from '../js/espn.js';
+import { parseEvent, parseStandings, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
 import { buildRounds, pickDefault } from '../js/rounds.js';
 import { computeTable, distances, finishedTable, formOf, reconcile, scenarios, zonesFor } from '../js/table.js';
 import { goalTimeNote, headlines, homeAwayNote, howItWent, impactLines, lastGoal, matchStory, roundStats, scoreChange, statsReading, tableLine, trends } from '../js/insights.js';
@@ -444,4 +444,19 @@ test('secador: no máximo 3 jogos que só mexem no objetivo, e o cartão aponta 
   assert.equal(head(null, {}, 'Red Bull Bragantino'), 'Nada em jogo para o Red Bull Bragantino na tabela');
   assert.equal(secadorSummary({ team: club('Red Bull Bragantino'), objective: null, base: { title: 0, g: 0, z: 0.003 }, zones: zz, verdicts: [] }).text, 'Dá para ver a rodada de boa.');
   assert.equal(secadorSummary({ team, objective: null, base: null, zones: zz, verdicts: [], ready: false }).sub, 'As contas aparecem quando a temporada carregar inteira.');
+});
+
+test('lance a lance ao vivo: chute ainda provisório ("temp-attempt") entra pelo texto', () => {
+  const play = (type, text, team = 'Botafogo') => ({ time: { displayValue: "34'", value: 2040 }, text, play: { type: { type }, team: { displayName: team }, period: { number: 1 } } });
+  const json = {
+    header: { competitions: [{ competitors: [{ homeAway: 'home', team: { displayName: 'Coritiba' } }, { homeAway: 'away', team: { displayName: 'Botafogo' } }] }] },
+    commentary: [
+      play('temp-attempt', 'Attempt blocked. Arthur Cabral (Botafogo) header from the centre of the box is blocked.'),
+      play('temp-attempt', 'Attempt saved. Danilo Santos (Botafogo) right footed shot from outside the box is saved.'),
+      play('temp-attempt', 'Attempt missed. Jacy (Coritiba) left footed shot from the left side of the box misses to the left.', 'Coritiba'),
+      play('temp-attempt', 'Something new.'),
+      play('own-goal', 'Own Goal by Marçal, Botafogo. Coritiba 1, Botafogo 0.', 'Coritiba'),
+    ],
+  };
+  assert.deepEqual(parseSummaryPlays(json).map((p) => `${p.type}:${p.side}`), ['shot-blocked:away', 'shot-on-target:away', 'shot-off-target:home', 'temp-attempt:away', 'own-goal:home']);
 });

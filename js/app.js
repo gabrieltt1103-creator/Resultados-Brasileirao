@@ -3,7 +3,7 @@ import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName,
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { chances, matchPicks, model, secador, suggestScore } from './sim.js';
-import { objectiveFor, rivalsOf, sameState, secadorSummary, verdict, verdictText } from './secador.js';
+import { objectiveFor, pick, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import * as fx from './fx.js';
 import { HOUR, addDays, dayLabel, dm, doo, esc, fmtTime, o, sameDay, save, shortDay, store, ymd } from './util.js';
@@ -87,7 +87,8 @@ const state = {
   hintOff: store('dica-time', false) === true,
   secadorOn: store(SECADOR_KEY, false) === true,
   rivals: cleanRivals(store(RIVALS_KEY, {})),
-  secador: null,          // contas do secador: {round, teamId, base, games}
+  secador: null,          // contas do secador: {round, teamId, teams: {id: {base, games}}}
+  secLines: null,         // linha do secador de cada jogo da rodada vista (para os avisos de gol)
   secadorSig: '',
   sheet: null,
   sheetStack: [],
@@ -463,33 +464,35 @@ function scheduleOdds(delay = 30) {
   }, delay);
 }
 
-// Secador: contas da rodada vista para o time do torcedor (só a rodada atual e as próximas).
+// Secador: contas da rodada vista para o time do torcedor e os rivais (só a rodada atual e as próximas).
 let secadorToken = 0;
 function scheduleSecador() {
   const t = state.table;
   const r = state.rounds[state.roundIdx];
   if (!state.secadorOn || !state.favorite || !t || t.mode !== 'jogos' || !r || state.roundIdx < state.focusIdx) return;
+  const team = allTeams().find((x) => x.id === state.favorite);
+  if (!team) return;
+  const teamIds = [team.id, ...[...rivalsOf(team, allTeams(), state.rivals)].sort()];
   const list = eventList();
   const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
   const done = list.filter((e) => e.status.kind === 'post').length;
-  const sig = `${r.number}|${state.favorite}|${done}|${live}|${state.zones.g}|${state.zones.zStart}`;
+  const sig = `${r.number}|${teamIds.join(',')}|${done}|${live}|${state.zones.g}|${state.zones.zStart}`;
   if (sig === state.secadorSig) return;
   state.secadorSig = sig;
   const token = ++secadorToken;
   const round = r.number;
-  const teamId = state.favorite;
   const input = {
     kind: 'secador', finished: [...t.finished.values()], events: list.map(compactEvent), zones: { g: state.zones.g, zStart: state.zones.zStart },
-    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamId, runs: SECADOR_RUNS,
+    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamIds, runs: SECADOR_RUNS,
   };
   const local = () => secador({ ...input, finished: t.finished });
-  // Um worker antigo (do cache do navegador) responderia com as chances: confere o formato.
+  // Um worker antigo (do cache do navegador) responderia em outro formato: confere antes de usar.
   inWorker(input, local)
-    .then((res) => (res === null || (res?.base && Array.isArray(res.games)) ? res : local()))
+    .then((res) => (res === null || res?.teams?.[team.id] ? res : local()))
     .then((res) => {
       if (token !== secadorToken) return;
-      // Sem as contas (temporada que não fecha), fica só a rivalidade.
-      state.secador = res ? { ...res, round, teamId } : { round, teamId, base: null, games: [], failed: true };
+      // Sem as contas (temporada que não fecha), o secador avisa e espera.
+      state.secador = res ? { ...res, round, teamId: team.id } : { round, teamId: team.id, teams: {}, failed: true };
       safe('os jogos', renderGames, el.matches);
     })
     .catch((err) => { state.diag.errors.push({ part: 'secador', error: errText(err), t: Date.now() }); });
@@ -505,17 +508,26 @@ function secadorView(r) {
   const rivalNames = teams.filter((t) => rivals.has(t.id)).map((t) => t.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   if (state.roundIdx < state.focusIdx) return { on: true, team, rivals: rivalNames, past: true };
   const got = state.secador?.round === r.number && state.secador.teamId === team.id ? state.secador : null;
-  const res = got?.failed ? null : got;
-  const objective = res ? objectiveFor(res.base, state.zones) : null;
-  const odds = new Map((res?.games || []).map((g) => [g.id, g]));
-  const verdicts = r.events.map((ev) => ({ ev, v: verdict(ev, { team, rivals, objective, odds: odds.get(ev.id) }) }));
+  const mine = got?.teams?.[team.id] || null;
+  const objective = mine ? objectiveFor(mine.base, state.zones) : null;
+  const odds = new Map((mine?.games || []).map((g) => [g.id, g]));
+  const verdicts = pick(r.events.map((ev) => {
+    const stakes = new Map();
+    for (const id of rivals) {
+      const st = stakeOf(got?.teams?.[id], ev, id, state.zones);
+      if (st) stakes.set(id, st);
+    }
+    return { ev, v: mine ? verdict(ev, { team, rivals, objective, odds: odds.get(ev.id), stakes }) : null };
+  }));
   const ready = state.table?.mode === 'jogos' && !got?.failed;
-  const summary = secadorSummary({ team, objective, base: res?.base || null, verdicts, zones: state.zones, ready });
+  const summary = secadorSummary({ team, objective, base: mine?.base || null, verdicts, zones: state.zones, ready, rivals: rivals.size });
+  // Jogo sem linha leva só o tipo (a v2 apaga um pouco os que não importam).
   const lines = new Map();
   for (const { ev, v } of verdicts) {
-    // Enquanto as contas não chegam, só o que não depende delas: o jogo do time e os rivais.
-    if (!v || (!res && !['mine', 'rival', 'derby'].includes(v.kind))) continue;
-    lines.set(ev.id, { kind: v.kind, good: v.state === 'ok', ...verdictText(ev, v, { objective, zones: state.zones }) });
+    if (!v) continue;
+    lines.set(ev.id, v.shown
+      ? { kind: v.kind, good: v.state === 'ok', ...verdictText(ev, v, { objective, zones: state.zones }) }
+      : { kind: v.kind === 'mine' ? 'mine' : 'none' });
   }
   return { on: true, team, rivals: rivalNames, summary, lines };
 }
@@ -619,6 +631,7 @@ function renderGames() {
   let sec = null;
   safe('o secador', () => {
     sec = state.favorite ? secadorView(r) : null;
+    state.secLines = sec?.lines || null;
     if (el.secador) el.secador.innerHTML = sec ? ui.secadorCard(sec) : '';
   }, el.secador);
   safe('o resumo', () => {
@@ -910,7 +923,10 @@ function flushAlerts() {
     for (const side of a.sides) {
       const team = ev[side];
       const g = lastGoal(ev, team);
-      toast(`<b class="tag tone-gol">Gol</b><span class="toast-body"><span>${score}</span><small>Gol ${esc(doo(team.name))}${g?.who ? ` · ${esc(g.who)} ${esc(g.min.label)}` : ''}</small></span>`, ev.id);
+      // Com o secador ligado, o aviso diz se a secada daquele jogo está dando certo.
+      const sec = state.secLines?.get(ev.id);
+      const secNote = sec?.state ? `<small class="toast-sec ${sec.good ? 'sec-ok' : 'sec-no'}">Secador: ${sec.good ? '✓ tá dando certo' : '✗ por enquanto, não'}</small>` : '';
+      toast(`<b class="tag tone-gol">Gol</b><span class="toast-body"><span>${score}</span><small>Gol ${esc(doo(team.name))}${g?.who ? ` · ${esc(g.who)} ${esc(g.min.label)}` : ''}</small>${secNote}</span>`, ev.id);
       if (team.id === state.favorite) celebrate = [team.color, team.color2, '#f5c518'].filter(Boolean);
     }
   }

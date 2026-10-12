@@ -1,7 +1,7 @@
 // Secador: em cada jogo da rodada, para quem torcer para o seu time se dar bem, e os rivais para secar.
 // As contas (quanto cada resultado muda as chances do time) vêm de secador() em sim.js; aqui ficam os
 // rivais, as regras de leitura e as frases, iguais nas duas versões do app.
-import { doo, o, pelo } from './util.js';
+import { dele, doo, o, pelo } from './util.js';
 
 // ---------- rivais ----------
 
@@ -99,19 +99,56 @@ export function pct(p) {
 }
 
 const RESULT = [1, 0, -1]; // posição nas listas de chances: vitória do mandante, empate, vitória do visitante
+const PLAIN = ['help', 'draw', 'nodraw'];
+
+// No sentido bom: chance de título e de G sobem, risco de cair desce.
+const goodOf = (objective, values) => (objective === 'z' ? values.map((p) => 1 - p) : values);
+// Lado raro da chance: 3% de risco de cair e 97% de G6 são "pequenos" do mesmo jeito.
+const rareOf = (list) => Math.max(...list.map((p) => Math.min(p, 1 - p)));
 
 /**
- * O resultado do jogo muda as chances do time de verdade? Diferença de 1,5 ponto percentual ou mais;
- * quando a chance é pequena (risco de 3% de cair), basta mudar um quarto dela. E os números
+ * O resultado do jogo muda as chances do time de verdade? 2 pontos percentuais ou mais entre o melhor e o
+ * pior resultado; com chance pequena (3% de risco de cair), basta mudar um quarto dela. E os números
  * mostrados precisam ser diferentes.
  */
 function weighs(good, shown) {
   const hi = Math.max(...good);
   const lo = Math.min(...good);
   const diff = hi - lo;
-  const rare = Math.max(...good.map((p) => Math.min(p, 1 - p)));
-  if (!(diff >= 0.015 || (diff >= 0.005 && diff >= 0.25 * rare))) return false;
+  if (!(diff >= 0.02 || (diff >= 0.005 && diff >= 0.25 * rareOf(good)))) return false;
   return pct(shown[good.indexOf(hi)]) !== pct(shown[good.indexOf(lo)]);
+}
+
+// Torcer pelo rival só com ganho de verdade: 3 pontos ou mais (um terço da chance, se ela é pequena).
+const worthIt = (diff, rare) => diff >= 0.03 || (diff >= 0.01 && diff >= 0.3 * rare);
+
+/**
+ * Quanto o próprio jogo pesa para um time (um rival): o objetivo dele e a chance com vitória, empate e
+ * derrota. res: contas desse time ({base, games}) vindas de secador(). Null se o time não joga ou não
+ * tem nada em jogo.
+ */
+export function stakeOf(res, ev, teamId, zones) {
+  if (!res || (ev.home.id !== teamId && ev.away.id !== teamId)) return null;
+  const objective = objectiveFor(res.base, zones);
+  const g = res.games.find((x) => x.id === ev.id);
+  if (!objective || !g) return null;
+  const [h, d, a] = g[objective];
+  const home = ev.home.id === teamId;
+  return { objective, win: home ? h : a, draw: d, lose: home ? a : h };
+}
+
+// Faixa em que a briga do rival está aberta de verdade (chance com empate, como retrato de agora):
+// título a partir de 10%, G entre 15% e 85%, risco de cair entre 8% e 95%.
+const OPEN = { title: [0.1, 0.95], g: [0.15, 0.85], z: [0.08, 0.95] };
+
+/**
+ * O jogo dói para o rival? Ele está numa briga aberta e perder muda 4 pontos ou mais. Rival tranquilo,
+ * sem nada em jogo ou com a briga praticamente decidida não vale a secada.
+ */
+export function hurts(s) {
+  if (!s) return false;
+  const [lo, hi] = OPEN[s.objective];
+  return s.draw >= lo && s.draw <= hi && Math.abs(s.win - s.lose) >= 0.04;
 }
 
 const outcome = (ev) => (ev.home.score == null || ev.away.score == null ? null : Math.sign(ev.home.score - ev.away.score));
@@ -119,34 +156,41 @@ const outcome = (ev) => (ev.home.score == null || ev.away.score == null ? null :
 /**
  * O que o torcedor quer num jogo.
  * team: time do torcedor; rivals: Set de ids; objective: 'title' | 'g' | 'z' | null;
- * odds: chances do jogo vindas de secador() ({title, g, z}, cada uma [mandante, empate, visitante]) ou null.
- * kind: 'mine' (jogo do time), 'help' (seque um time), 'draw' (torça pelo empate), 'nodraw' (o empate é o
- * pior), 'double' (secar o rival ainda ajuda), 'nose' (nariz tapado: o melhor é o rival vencer),
- * 'rival' (só pela rivalidade), 'derby' (dois rivais: empate), 'none' (tanto faz).
- * best/worst: posição do melhor e do pior resultado em values; ok: posições que contam como acerto.
- * Devolve null para jogo adiado.
+ * odds: chances do time do torcedor neste jogo, vindas de secador() ({title, g, z}, cada uma
+ * [mandante, empate, visitante]) ou null; stakes: Map idDoRival -> stakeOf() deste jogo.
+ * kind:
+ *   'mine' (jogo do time; contra rival, é clássico), 'help' (seque um time), 'draw' (torça pelo empate),
+ *   'nodraw' (o empate é o pior), 'double' (secar o rival ainda ajuda), 'nose' (nariz tapado: vale
+ *   torcer pelo rival), 'pride' (a vitória do rival até ajudaria, mas pouco: seque mesmo assim),
+ *   'rival' (o jogo dói para o rival), 'derby' (dois rivais, um deles em apuros: empate), 'none'.
+ * best/worst: posição do melhor e do pior resultado em values; swing: diferença entre eles;
+ * ok: posições que contam como acerto. Devolve null para jogo adiado.
  */
-export function verdict(ev, { team, rivals = new Set(), objective = null, odds = null }) {
+export function verdict(ev, { team, rivals = new Set(), objective = null, odds = null, stakes = new Map() }) {
   if (ev.status.kind === 'off') return null;
   const hr = rivals.has(ev.home.id);
   const ar = rivals.has(ev.away.id);
   const values = objective && odds?.[objective] ? odds[objective] : null;
-  const v = { kind: 'none', values, best: null, worst: null, ok: null, cheer: null, dry: null, small: false, rival: hr || ar, both: hr && ar, state: null };
+  const v = { kind: 'none', values, best: null, worst: null, swing: 0, ok: null, cheer: null, dry: null, stake: null, rival: hr || ar, both: hr && ar, state: null };
   const winner = (i) => (i === 0 ? ev.home : i === 2 ? ev.away : null);
+  const other = (t) => (t.id === ev.home.id ? ev.away : ev.home);
+  const loses = (t) => (t.id === ev.home.id ? [1, 2] : [0, 1]);
+  const hot = (t) => (rivals.has(t.id) && hurts(stakes.get(t.id)) ? stakes.get(t.id) : null);
   if (ev.home.id === team.id || ev.away.id === team.id) {
     v.kind = 'mine';
     v.home = ev.home.id === team.id;
     return v;
   }
-  const good = values && (objective === 'z' ? values.map((p) => 1 - p) : values);
+  const good = values && goodOf(objective, values);
   if (good && weighs(good, values)) {
     const b = good.indexOf(Math.max(...good));
     const w = good.indexOf(Math.min(...good));
     const mid = 3 - b - w;
     v.best = b;
     v.worst = w;
+    v.swing = good[b] - good[w];
     // Resultado do meio quase tão bom quanto o melhor: o que importa é o pior não acontecer.
-    const loose = good[mid] - good[w] >= 0.6 * (good[b] - good[w]);
+    const loose = good[mid] - good[w] >= 0.6 * v.swing;
     v.ok = loose ? [b, mid] : [b];
     if (b === 1 && !loose) v.kind = 'draw';
     else if (b === 1) {
@@ -159,17 +203,29 @@ export function verdict(ev, { team, rivals = new Set(), objective = null, odds =
       v.dry = winner(2 - b);
     }
     if (v.kind === 'help' && v.cheer && rivals.has(v.cheer.id)) {
-      v.kind = 'nose';
-      v.small = good[b] - good[w] < 0.03;
+      // O melhor é o rival vencer. Só vale com ganho de verdade e maior que o dele na briga dele.
+      const s = hot(v.cheer);
+      if (worthIt(v.swing, rareOf(good)) && !(s && Math.abs(s.win - s.lose) > v.swing)) v.kind = 'nose';
+      else if (v.both) {
+        v.kind = 'derby';
+        v.ok = [1];
+      } else {
+        v.kind = 'pride';
+        v.stake = s;
+        v.dry = v.cheer;
+        v.cheer = other(v.dry);
+        v.ok = loses(v.dry);
+      }
     } else if (v.kind === 'help' && rivals.has(v.dry.id)) v.kind = 'double';
-  } else if (v.both) {
+  } else if (v.both && (hot(ev.home) || hot(ev.away))) {
     v.kind = 'derby';
     v.ok = [1];
-  } else if (v.rival) {
+  } else if (v.rival && !v.both && hot(hr ? ev.home : ev.away)) {
     v.kind = 'rival';
     v.dry = hr ? ev.home : ev.away;
-    v.cheer = hr ? ev.away : ev.home;
-    v.ok = hr ? [1, 2] : [0, 1];
+    v.cheer = other(v.dry);
+    v.stake = hot(v.dry);
+    v.ok = loses(v.dry);
   }
   // Ao vivo e encerrado: o resultado de agora é um dos que o torcedor quer?
   const now = outcome(ev);
@@ -179,9 +235,25 @@ export function verdict(ev, { team, rivals = new Set(), objective = null, odds =
   return v;
 }
 
+/**
+ * Quais jogos ganham linha, para a rodada não virar um mar de selos: o do time quando há algo em jogo
+ * (ou é clássico), os de rival e, dos que só mexem no objetivo, os 3 que mais pesam.
+ * Marca v.shown em cada {ev, v} e devolve a mesma lista.
+ */
+export function pick(verdicts, max = 3) {
+  const plain = verdicts.filter((x) => x.v && PLAIN.includes(x.v.kind)).sort((a, b) => b.v.swing - a.v.swing).slice(0, max);
+  for (const x of verdicts) {
+    if (!x.v) continue;
+    const k = x.v.kind;
+    x.v.shown = k === 'mine' ? !!(x.v.values || x.v.rival) : k === 'none' ? false : PLAIN.includes(k) ? plain.includes(x) : true;
+  }
+  return verdicts;
+}
+
 // ---------- frases ----------
 
 const GOAL = { title: () => 'Chance de título', g: (zones) => `Chance de ${zones?.gLabel || 'G6'}`, z: () => 'Risco de cair' };
+const YOUR = { title: () => 'a sua chance de título', g: (zones) => `a sua chance de ${zones?.gLabel || 'G6'}`, z: () => 'a sua fuga da queda' };
 
 // "Chance de G6: 87% com vitória do Grêmio, 84% com a do Cruzeiro."
 function numbers(ev, v, objective, zones) {
@@ -192,6 +264,18 @@ function numbers(ev, v, objective, zones) {
   };
   const both = v.best !== 1 && v.worst !== 1;
   return `${GOAL[objective](zones)}: ${pct(v.values[v.best])} com ${res(v.best)}, ${pct(v.values[v.worst])} com ${res(v.worst, both)}.`;
+}
+
+// O que o rival perde: "Se o Flamengo perder, a chance de título dele cai para 47%."
+function rivalLoss(t, s, zones) {
+  if (s.objective === 'z') return `Se ${o(t.name)} perder, o risco de cair ${dele(t.name)} sobe para ${pct(s.lose)}.`;
+  return `Se ${o(t.name)} perder, a chance de ${s.objective === 'title' ? 'título' : zones?.gLabel || 'G6'} ${dele(t.name)} cai para ${pct(s.lose)}.`;
+}
+
+// O que o rival ganharia: "ajudaria o Coritiba a fugir da queda".
+function rivalGain(t, s, zones) {
+  if (s.objective === 'z') return `ajudaria ${o(t.name)} a fugir da queda`;
+  return `deixaria ${o(t.name)} mais perto do ${s.objective === 'title' ? 'título' : zones?.gLabel || 'G6'}`;
 }
 
 /**
@@ -209,10 +293,11 @@ export function verdictText(ev, v, { objective, zones } = {}) {
   const dry = v.dry?.name;
   switch (v.kind) {
     case 'mine': {
-      if (!v.values) return { chip: 'Seu jogo', text: v.rival ? 'Clássico contra o rival.' : '', state: '' };
+      const chip = v.rival ? 'Clássico' : 'Seu jogo';
+      if (!v.values) return { chip, text: v.rival ? 'Vale mais que três pontos.' : '', state: '' };
       const [h, d, a] = v.values;
       const [win, lose] = v.home ? [h, a] : [a, h];
-      return { chip: 'Seu jogo', text: `${GOAL[objective](zones)}: ${pct(win)} se vencer, ${pct(d)} se empatar, ${pct(lose)} se perder.`, state: '' };
+      return { chip, text: `${GOAL[objective](zones)}: ${pct(win)} se vencer, ${pct(d)} se empatar, ${pct(lose)} se perder.`, state: '' };
     }
     case 'help':
       return { chip: `Seque ${o(dry)}`, text: done || !cheer ? nums : `Torça ${pelo(cheer)}. ${nums}`, state };
@@ -220,70 +305,79 @@ export function verdictText(ev, v, { objective, zones } = {}) {
       return { chip: 'Seca em dobro', text: done ? nums : `Secar ${o(dry)}, seu rival, ainda ajuda o seu time. ${nums}`, state };
     case 'nose':
       if (done) return { chip: 'Nariz tapado', text: `${nums}${v.state === 'ok' ? ` Dessa vez, foi bom ${o(cheer)} vencer.` : ''}`, state };
-      return v.small
-        ? { chip: 'Nariz tapado', text: `Uma vitória ${doo(cheer)}, seu rival, ajuda um pouco. ${nums} Se quiser secar mesmo assim, ninguém vai te julgar.`, state }
-        : { chip: 'Nariz tapado', text: `Dessa vez, torça ${pelo(cheer)}, seu rival. ${nums}${v.both ? ` Pelo menos ${o(dry)} perde.` : ''} Ninguém precisa saber.`, state };
+      return { chip: 'Nariz tapado', text: `Dessa vez, torça ${pelo(cheer)}, seu rival. ${nums}${v.both ? ` Pelo menos ${o(dry)} perde.` : ''} Ninguém precisa saber.`, state };
+    case 'pride':
+      if (done) return { chip: `Seque ${o(dry)}`, text: '', state };
+      return {
+        chip: `Seque ${o(dry)}`,
+        text: v.stake
+          ? `A vitória ${doo(dry)} até ajudaria ${YOUR[objective](zones)}, mas também ${rivalGain(v.dry, v.stake, zones)}. Seque mesmo.`
+          : `A vitória ${doo(dry)} até ajudaria um pouquinho ${YOUR[objective](zones)}, mas tem coisa que não se faz.`,
+        state,
+      };
     case 'draw':
       return { chip: 'Torça pelo empate', text: `${nums}${done ? '' : v.both ? ' E os dois rivais perdem pontos.' : v.rival ? ' E o rival ainda perde pontos.' : ''}`, state };
     case 'nodraw':
       return { chip: 'Tem que ter vencedor', text: done ? nums : `Tanto faz quem vença: o empate é o pior para você. ${nums}`, state };
     case 'derby':
-      return { chip: 'Clássico dos rivais', text: done ? 'O melhor era o empate: os dois perdendo pontos.' : 'Torça pelo empate: os dois perdem pontos.', state };
+      return { chip: 'Clássico dos rivais', text: done ? '' : 'Torça pelo empate: os dois perdem pontos.', state };
     case 'rival':
-      return { chip: `Seque ${o(dry)}`, text: done ? 'Só pela rivalidade.' : `Torça ${pelo(cheer)}, só pela rivalidade.`, state };
+      return { chip: `Seque ${o(dry)}`, text: done ? '' : `Torça ${pelo(cheer)}. ${rivalLoss(v.dry, v.stake, zones)}`, state };
     default:
-      return { chip: '', text: 'Tanto faz pra você', state: '' };
+      return { chip: '', text: '', state: '' };
   }
 }
 
 /**
- * Cartão do secador: objetivo do time e o resumo da rodada.
- * base: chances do time ({title, g, z}) ou null enquanto calcula; verdicts: [{ev, v}] da rodada.
+ * Cartão do secador: objetivo do time e o resumo da rodada, com o jogo que mais pesa.
+ * base: chances do time ({title, g, z}) ou null enquanto calcula; verdicts: [{ev, v}] da rodada, já
+ * passados por pick(); rivals: quantos rivais o torcedor tem.
  */
-export function secadorSummary({ team, objective, base, verdicts, zones, ready = true }) {
+export function secadorSummary({ team, objective, base, verdicts, zones, ready = true, rivals = 0 }) {
   let head;
   let sub = '';
   if (!base) {
     head = team.name;
     sub = ready ? 'Calculando as chances…' : 'As contas aparecem quando a temporada carregar inteira.';
   } else if (objective === 'title') {
-    head = `${team.name} na briga pelo título`;
-    sub = `${pct(base.title)} de chance hoje`;
+    const p = base.title;
+    head = p >= 0.9 ? `${team.name} com a mão na taça` : p < 0.15 ? `${team.name} ainda sonha com o título` : `${team.name} na briga pelo título`;
+    sub = `${pct(p)} de chance de título hoje`;
   } else if (objective === 'g') {
-    head = `${team.name} na briga pelo ${zones?.gLabel || 'G6'}`;
-    sub = `${pct(base.g)} de chance hoje`;
+    const p = base.g;
+    const g = zones?.gLabel || 'G6';
+    head = p >= 0.9 ? `${team.name} perto de garantir o ${g}` : p < 0.15 ? `${team.name} correndo atrás do ${g}` : `${team.name} na briga pelo ${g}`;
+    sub = `${pct(p)} de chance de ${g} hoje`;
   } else if (objective === 'z') {
-    head = `${team.name} contra o rebaixamento`;
-    sub = `${pct(base.z)} de risco de cair hoje`;
-  } else {
-    head = `Nada em jogo para ${o(team.name)} na tabela`;
-    sub = 'Sobra a rivalidade';
-  }
-  const list = verdicts.filter((x) => x.v && x.v.kind !== 'mine' && x.v.kind !== 'none');
-  const count = (kinds) => list.filter((x) => kinds.includes(x.v.kind)).length;
-  const matter = count(['help', 'draw', 'double', 'nose', 'nodraw']);
-  const nose = count(['nose']);
-  const rival = count(['rival', 'derby']);
-  const started = list.filter((x) => x.v.state);
+    const p = base.z;
+    head = p >= 0.9 ? `${team.name} precisa de um milagre` : p < 0.1 ? `${team.name} ainda de olho na queda` : `${team.name} contra o rebaixamento`;
+    sub = `${pct(p)} de risco de cair hoje`;
+  } else head = `Nada em jogo para ${o(team.name)} na tabela`;
+  const shown = verdicts.filter((x) => x.v?.shown && x.v.kind !== 'mine');
+  const obj = shown.filter((x) => [...PLAIN, 'double', 'nose'].includes(x.v.kind)).sort((a, b) => b.v.swing - a.v.swing);
+  const riv = shown.filter((x) => ['rival', 'derby', 'pride'].includes(x.v.kind));
+  const started = shown.filter((x) => x.v.state);
+  const your = objective ? YOUR[objective](zones) : '';
   let text;
   if (started.length) {
     const ok = started.filter((x) => x.v.state === 'ok').length;
     const n = started.length;
     const live = started.some((x) => x.ev.status.kind === 'live');
-    const pending = list.length - n;
+    const pending = shown.length - n;
     if (!ok) text = live ? 'Nenhuma secada está dando certo por enquanto.' : n === 1 ? 'A secada não deu certo.' : `Nenhuma das ${n} secadas deu certo.`;
     else if (n === 1) text = live ? 'A secada está dando certo.' : 'A secada deu certo.';
     else text = `${ok} de ${n} secadas ${live ? (ok === 1 ? 'está dando certo' : 'estão dando certo') : ok === 1 ? 'deu certo' : 'deram certo'}.`;
     if (pending) text += ` ${pending === 1 ? 'Falta 1 jogo' : `Faltam ${pending} jogos`}.`;
-  } else if (matter) {
-    text = `${matter === 1 ? '1 jogo importa' : `${matter} jogos importam`} pra você nesta rodada.`;
-    if (nose) text += nose === 1 ? (matter === 1 ? ' E é de nariz tapado.' : ' Um deles é de nariz tapado.') : ` ${nose} são de nariz tapado.`;
-    if (rival) text += ' E tem rival para secar.';
-  } else if (rival) {
-    text = base && objective ? 'Nenhum outro jogo mexe com as chances do seu time, mas tem rival para secar.' : 'Tem rival para secar nesta rodada.';
-  } else {
-    text = base && objective ? 'Nenhum outro jogo mexe com as chances do seu time nesta rodada.' : 'Nenhum rival joga nesta rodada.';
-  }
-  if (!base && !rival) text = '';
+  } else if (obj.length) {
+    const top = obj[0];
+    const game = `${top.ev.home.name} x ${top.ev.away.name}${top.v.kind === 'nose' ? ', de nariz tapado' : ''}`;
+    text = obj.length === 1 ? `Um jogo mexe com ${your}: ${game}.` : `${obj.length} jogos mexem com ${your}. O que mais pesa: ${game}.`;
+    if (top.v.kind !== 'nose' && obj.some((x) => x.v.kind === 'nose')) text += ' Um deles é de nariz tapado.';
+    if (riv.length) text += ' E tem rival para secar.';
+  } else if (riv.length) {
+    text = objective ? `Nenhum jogo mexe com ${your}, mas tem rival para secar.` : 'Tem rival em apuros para secar.';
+  } else if (objective) text = `Nenhum jogo mexe com ${your}. Dá para ver a rodada de boa.`;
+  else text = rivals ? 'Nenhum rival em apuros. Dá para ver a rodada de boa.' : 'Dá para ver a rodada de boa.';
+  if (!base) text = '';
   return { head, sub, text };
 }

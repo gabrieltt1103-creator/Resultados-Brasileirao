@@ -272,18 +272,21 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
 const OUTCOMES = [(h, a) => (h > a ? [h, a] : [1, 0]), (h, a) => (h === a ? [h, a] : [1, 1]), (h, a) => (h < a ? [h, a] : [0, 1])];
 
 /**
- * Secador: para cada jogo escolhido, a chance do time terminar campeão, no G e no Z com cada
- * resultado (vitória do mandante, empate, vitória do visitante), sem os placares simulados pelo usuário.
- * Os três resultados são testados no mesmo sorteio do resto do campeonato (números aleatórios
- * comuns): a diferença entre eles vem só do jogo trocado, sem o ruído de sorteios diferentes.
+ * Secador: para cada jogo escolhido, a chance de cada time pedido terminar campeão, no G e no Z com
+ * cada resultado (vitória do mandante, empate, vitória do visitante), sem os placares simulados pelo
+ * usuário. Os três resultados são testados no mesmo sorteio do resto do campeonato (números
+ * aleatórios comuns): a diferença entre eles vem só do jogo trocado, sem o ruído de sorteios diferentes.
  * Jogo já encerrado também entra: troca o placar real pelo resultado testado.
- * Devolve {runs, base: {title, g, z}, games: [{id, title: [m, e, v], g: [...], z: [...]}]} ou null.
+ * teamIds: o time do torcedor e os rivais.
+ * Devolve {runs, teams: {id: {base: {title, g, z}, games: [{id, title: [m, e, v], g: [...], z: [...]}]}}} ou null.
  */
-export function secador({ finished, events, targets, teamId, zones, runs = 4000, seed = 11 }) {
+export function secador({ finished, events, targets, teamIds, zones, runs = 4000, seed = 11 }) {
   const prep = prepare({ finished, events });
-  if (!prep || !prep.idx.has(teamId)) return null;
-  const { rows, n, idx, pts, w, gd, gf, live, left } = prep;
-  const me = idx.get(teamId);
+  if (!prep) return null;
+  const { n, idx, pts, w, gd, gf, live, left } = prep;
+  const ids = teamIds.filter((id, i) => idx.has(id) && teamIds.indexOf(id) === i);
+  if (!ids.length) return null;
+  const who = ids.map((id) => idx.get(id));
   const byId = new Map(events.map((e) => [e.id, e]));
   const leftAt = new Map(left.map((g, k) => [`${g[0]}|${g[1]}`, k]));
   const liveAt = new Map(live.map((g, k) => [g[6], k]));
@@ -309,22 +312,31 @@ export function secador({ finished, events, targets, teamId, zones, runs = 4000,
   const J = new Float64Array(n);
   const liveRes = new Int32Array(live.length * 2);
   const leftRes = new Int32Array(left.length * 2);
-  const base = [0, 0, 0];
-  const hit = new Uint32Array(tg.length * 9);
+  const T = ids.length;
+  const base = new Uint32Array(T * 3);
+  const hit = new Uint32Array(T * tg.length * 9);
   const add = (h, a, hs, as, s) => {
     F[h] += s * hs; F[a] += s * as; D[h] += s * (hs - as); D[a] += s * (as - hs);
     if (hs > as) { P[h] += 3 * s; W[h] += s; } else if (hs < as) { P[a] += 3 * s; W[a] += s; } else { P[h] += s; P[a] += s; }
   };
-  // Posição do time (0 = líder), com os mesmos critérios de desempate de chances().
-  const rank = () => {
+  // Posição do time m (0 = líder), com os mesmos critérios de desempate de chances().
+  const rank = (m) => {
     let r = 0;
     for (let j = 0; j < n; j++) {
-      if (j === me) continue;
-      if (P[j] > P[me] || (P[j] === P[me] && (W[j] > W[me] || (W[j] === W[me] && (D[j] > D[me] || (D[j] === D[me] && (F[j] > F[me] || (F[j] === F[me] && J[j] > J[me])))))))) r++;
+      if (j === m) continue;
+      if (P[j] > P[m] || (P[j] === P[m] && (W[j] > W[m] || (W[j] === W[m] && (D[j] > D[m] || (D[j] === D[m] && (F[j] > F[m] || (F[j] === F[m] && J[j] > J[m])))))))) r++;
     }
     return r;
   };
-  const tally = (r, out, at) => { if (r === 0) out[at]++; if (r < g) out[at + 1]++; if (r >= zFrom) out[at + 2]++; };
+  const tally = (out, at) => {
+    for (let k = 0; k < T; k++) {
+      const r = rank(who[k]);
+      const i = at(k);
+      if (r === 0) out[i]++;
+      if (r < g) out[i + 1]++;
+      if (r >= zFrom) out[i + 2]++;
+    }
+  };
   for (let s = 0; s < runs; s++) {
     P.set(pts); W.set(w); D.set(gd); F.set(gf);
     live.forEach(([h, a, hs, as, lh, la], k) => {
@@ -340,23 +352,27 @@ export function secador({ finished, events, targets, teamId, zones, runs = 4000,
       add(h, a, x, y, 1);
     });
     for (let i = 0; i < n; i++) J[i] = rand();
-    tally(rank(), base, 0);
+    tally(base, (k) => k * 3);
     tg.forEach((t, ti) => {
       const [x, y] = t.done || (t.live != null ? [liveRes[2 * t.live], liveRes[2 * t.live + 1]] : [leftRes[2 * t.left], leftRes[2 * t.left + 1]]);
       add(t.h, t.a, x, y, -1);
       OUTCOMES.forEach((pick, o) => {
         const [hs, as] = pick(x, y);
         add(t.h, t.a, hs, as, 1);
-        tally(rank(), hit, ti * 9 + o * 3);
+        tally(hit, (k) => (k * tg.length + ti) * 9 + o * 3);
         add(t.h, t.a, hs, as, -1);
       });
       add(t.h, t.a, x, y, 1);
     });
   }
-  const at = (ti, o, k) => hit[ti * 9 + o * 3 + k] / runs;
-  return {
-    runs,
-    base: { title: base[0] / runs, g: base[1] / runs, z: base[2] / runs },
-    games: tg.map((t, ti) => ({ id: t.id, title: [0, 1, 2].map((o) => at(ti, o, 0)), g: [0, 1, 2].map((o) => at(ti, o, 1)), z: [0, 1, 2].map((o) => at(ti, o, 2)) })),
-  };
+  const teams = {};
+  ids.forEach((id, k) => {
+    const at = (ti, o, j) => hit[(k * tg.length + ti) * 9 + o * 3 + j] / runs;
+    const three = (ti, j) => [0, 1, 2].map((o) => at(ti, o, j));
+    teams[id] = {
+      base: { title: base[k * 3] / runs, g: base[k * 3 + 1] / runs, z: base[k * 3 + 2] / runs },
+      games: tg.map((t, ti) => ({ id: t.id, title: three(ti, 0), g: three(ti, 1), z: three(ti, 2) })),
+    };
+  });
+  return { runs, teams };
 }

@@ -6,7 +6,7 @@ self.onmessage = (e) => {
   const rows = new Map(finished.map((r) => [r.id, r]));
   let result = null;
   try {
-    if (kind === 'secador') result = secador({ finished: rows, events, targets: e.data.targets, teamId: e.data.teamId, zones, runs });
+    if (kind === 'secador') result = secador({ finished: rows, events, targets: e.data.targets, teamIds: e.data.teamIds, zones, runs });
     else {
       const out = chances({ finished: rows, events, overrides, zones, runs });
       if (out) result = { byId: [...out.byId], runs: out.runs, left: out.left };

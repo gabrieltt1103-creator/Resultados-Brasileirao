@@ -186,15 +186,14 @@ export const favoriteHint = () => `
 const DRYER = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6.5A4.5 4.5 0 0 1 7.5 2H15a3 3 0 0 1 3 3v3a3 3 0 0 1-3 3h-2.2l-1.1 6.4a1.4 1.4 0 0 1-1.4 1.1H9a1.2 1.2 0 0 1-1.2-1.3l.5-6.2h-.8A4.5 4.5 0 0 1 3 6.5zm4.5-1.7a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z" fill="currentColor" fill-rule="evenodd"/><path d="M19.6 4.2h1.9M19.6 6.5h2.4M19.6 8.8h1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 // Pregador de roupa, para o nariz tapado.
 const PIN = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 2.5l3.2 9.2M16 2.5l-3.2 9.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M9.7 10.5h4.6a2.2 2.2 0 0 1 2.2 2.2v6.6a2.2 2.2 0 0 1-2.2 2.2H9.7a2.2 2.2 0 0 1-2.2-2.2v-6.6a2.2 2.2 0 0 1 2.2-2.2zm2.3 2.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z" fill="currentColor" fill-rule="evenodd"/></svg>';
-const SEC_ICON = { help: DRYER, rival: DRYER, double: DRYER + DRYER, nose: PIN };
+const SEC_ICON = { help: DRYER, rival: DRYER, pride: DRYER, double: DRYER + DRYER, nose: PIN };
 
 /**
  * Linha do secador embaixo de um jogo. s: {kind, chip, text, state, good} (frases de verdictText em
  * secador.js; good: o resultado de agora é o que o torcedor quer) ou null.
  */
 export function secadorLine(s) {
-  if (!s) return '';
-  if (s.kind === 'none') return `<div class="sec-line none">${esc(s.text)}</div>`;
+  if (!s?.chip) return '';
   const state = s.state ? ` <em class="${s.good ? 'sec-ok' : 'sec-no'}">${s.good ? '✓' : '✗'} ${esc(s.state)}</em>` : '';
   return `<div class="sec-line k-${esc(s.kind)}"><b class="sec-chip">${SEC_ICON[s.kind] || ''}${esc(s.chip)}</b>${s.text || state ? `<span>${esc(s.text)}${state}</span>` : ''}</div>`;
 }
@@ -205,18 +204,15 @@ export function secadorLine(s) {
  */
 export function secadorCard({ on, team, summary, rivals = [], past = false }) {
   const toggle = `<button type="button" class="sec-toggle" role="switch" aria-checked="${on}" data-action="secador" aria-label="${on ? 'Desligar o secador' : 'Ligar o secador'}"><i></i></button>`;
-  const top = `<div class="sec-top"><span class="sec-title"><i class="sec-ico">${DRYER}</i>Secador</span>${toggle}</div>`;
-  if (!on) {
-    return `<section class="secador off">${top}
-      <p class="sec-text">Ligue para ver contra quem torcer em cada jogo da rodada para ${esc(o(team.name))} se dar bem, e quem secar só pela rivalidade.</p></section>`;
-  }
+  const top = (sub) => `<div class="sec-top"><span class="sec-title"><i class="sec-ico">${DRYER}</i><span>Secador${sub ? `<small>${esc(sub)}</small>` : ''}</span></span>${toggle}</div>`;
+  // Desligado, ou numa rodada que já passou: só uma linha, para não pesar no topo dos jogos.
+  if (!on) return `<section class="secador compact">${top('Contra quem torcer nesta rodada')}</section>`;
+  if (past) return `<section class="secador on compact">${top('Olha a rodada atual e as próximas')}</section>`;
   const names = rivals.length ? rivals.join(', ').replace(/, ([^,]*)$/, ' e $1') : 'nenhum';
-  const foot = `<button type="button" class="sec-rivals" data-team="${esc(team.id)}"><span>${rivals.length > 1 ? 'Rivais' : 'Rival'}: <b>${esc(names)}</b></span><u>${rivals.length ? 'editar' : 'escolher'}</u></button>`;
-  if (past) return `<section class="secador on">${top}<p class="sec-text">O secador olha para a rodada atual e as próximas. Use as setas no topo para voltar.</p>${foot}</section>`;
-  return `<section class="secador on">${top}
+  return `<section class="secador on">${top('')}
     <div class="sec-who">${crest(team.logo, team.name, 24)}<span>${esc(summary.head)}${summary.sub ? `<small>${esc(summary.sub)}</small>` : ''}</span></div>
     ${summary.text ? `<p class="sec-text">${esc(summary.text)}</p>` : ''}
-    ${foot}
+    <button type="button" class="sec-rivals" data-team="${esc(team.id)}"><span>${rivals.length > 1 ? 'Rivais' : 'Rival'}: <b>${esc(names)}</b></span><u>${rivals.length ? 'editar' : 'escolher'}</u></button>
   </section>`;
 }
 
@@ -550,8 +546,8 @@ function rivalsBlock(r, open) {
   const chip = (t) => `<button type="button" class="rival-chip${r.on.has(t.id) ? ' on' : ''}" data-action="rival" data-id="${esc(t.id)}" aria-pressed="${r.on.has(t.id)}">${crest(t.logo, t.name, 18, 'mini')}<span>${esc(t.name)}</span></button>`;
   const shown = [...r.same, ...r.others.filter((t) => r.on.has(t.id))];
   const rest = r.others.filter((t) => !r.on.has(t.id));
-  const note = !r.secadorOn ? 'Ligue o Secador na aba Jogos para ver quando secar cada um.'
-    : !shown.length ? 'Nenhum time do mesmo estado na Série A. Escolha um rival em outros times.' : 'Toque para ligar ou desligar.';
+  const note = !shown.length ? 'Nenhum time do mesmo estado na Série A. Escolha um rival em outros times.'
+    : `Toque para ligar ou desligar. O Secador só lembra de secar um rival quando o jogo pesa para ele.${r.secadorOn ? '' : ' Ligue o Secador na aba Jogos.'}`;
   return `<section class="sheet-block rivals">
     <h3 class="sub-title">Rivais <small>para o Secador</small></h3>
     ${shown.length ? `<div class="rival-chips">${shown.map(chip).join('')}</div>` : ''}

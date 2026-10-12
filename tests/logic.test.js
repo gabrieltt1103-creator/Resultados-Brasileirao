@@ -398,10 +398,20 @@ test('secador: para quem torcer em cada jogo', () => {
   assert.equal(read(cap, game('Athletico Paranaense', 'Palmeiras'), [0.942, 0.868, 0.821]).text, 'Chance de G6: 94% se vencer, 87% se empatar, 82% se perder.');
   assert.equal(read(cap, game('Chapecoense', 'Athletico Paranaense'), [0.80, 0.85, 0.95]).text, 'Chance de G6: 95% se vencer, 85% se empatar, 80% se perder.');
   assert.equal(read(cap, game('Coritiba', 'Athletico Paranaense'), [0.80, 0.85, 0.95]).chip, 'Clássico');
-  // Jogo encerrado: a conta e se deu certo, sem pedir torcida. Adiado: nada.
+  // Jogo encerrado: o que o resultado fez, sem pedir torcida. Adiado: nada.
   r = read(cap, game('Grêmio', 'Cruzeiro', 'post', 0, 2), [0.889, 0.883, 0.864]);
   assert.equal(r.text, 'Chance de G6: 89% com vitória do Grêmio, 86% com a do Cruzeiro.');
   assert.equal(r.state, 'Não deu');
+  assert.equal(read(cap, game('Athletico Paranaense', 'Palmeiras', 'post', 1, 1), [0.942, 0.868, 0.821]).text, 'Com o empate, a chance de G6 ficou em 87%.');
+  assert.equal(read('Vasco', game('Remo', 'Vasco', 'post', 0, 2), [0.06, 0.04, 0.01], 'z').text, 'Com a vitória, o risco de cair ficou em 1%.');
+  const fla = { Flamengo: { objective: 'title', win: 0.69, draw: 0.54, lose: 0.47 } };
+  r = read('Vasco', game('Bahia', 'Flamengo', 'post', 2, 0), null, null, fla);
+  assert.deepEqual([r.text, r.state], ['O Flamengo perdeu: a chance de título dele ficou em 47%.', 'Deu certo']);
+  assert.equal(read('Vasco', game('Bahia', 'Flamengo', 'post', 0, 1), null, null, fla).text, 'O Flamengo venceu: a chance de título dele ficou em 69%.');
+  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 1, 0), null, null, fla).text, 'O Flamengo venceu; o melhor era o empate.');
+  assert.equal(read('Vasco', game('Flamengo', 'Fluminense', 'post', 1, 1), null, null, fla).text, 'Empate: os dois rivais perderam pontos.');
+  assert.equal(read(cap, game('Atlético-MG', 'Coritiba', 'post', 2, 0), [0.86, 0.87, 0.882]).text, 'O Coritiba não venceu: secada cumprida.');
+  assert.equal(read(cap, game('Atlético-MG', 'Coritiba', 'post', 0, 1), [0.86, 0.87, 0.882]).text, 'O Coritiba venceu. Pelo menos ajudou um pouquinho a sua chance de G6.');
   assert.equal(verdict(game('Grêmio', 'Cruzeiro', 'off'), { team: club(cap) }), null);
 });
 

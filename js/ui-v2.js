@@ -121,7 +121,7 @@ export function matchCard(ev, ctx) {
     ${live ? `<div class="v2-livehdr"><i></i>${esc(s.half ? 'Intervalo' : `Ao vivo · ${s.label}`)}</div>` : ''}
     <div class="v2-row">${side(ev.home, 'home')}${center}${side(ev.away, 'away')}</div>
     ${stakes}${who}
-    ${tags.length || foot ? `<div class="v2-foot">${tags.map((t) => `<b class="v2-chip">${esc(t)}</b>`).join('')}${foot ? `<span>${esc(foot)}</span>` : ''}</div>` : ''}
+    ${tags.length || foot || ctx.secador?.quiet ? `<div class="v2-foot">${tags.map((t) => `<b class="v2-chip">${esc(t)}</b>`).join('')}${foot ? `<span>${esc(foot)}</span>` : ''}${ctx.secador?.quiet ? `<span class="sec-quiet">${esc(ctx.secador.quiet)}</span>` : ''}</div>` : ''}
     ${secadorLine(ctx.secador)}
   </article>`;
 }

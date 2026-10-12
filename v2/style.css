@@ -223,8 +223,9 @@ main { padding-top: 10px; }
 .v2-game.sec-none.is-pre .v2-row { opacity: 0.55; }
 .v2-game .sec-chip { gap: 5px; margin-right: 7px; vertical-align: 0; padding: 4px 7px; border-radius: 6px; font: 800 10.5px/1 var(--body); font-stretch: 110%; letter-spacing: 0.05em; }
 .v2-game.sec-mine .sec-chip { background: var(--ink); color: var(--surface); }
-.v2-game .k-draw .sec-chip, .v2-game .k-derby .sec-chip, .v2-game .k-nodraw .sec-chip { background: var(--pill); box-shadow: none; }
+.v2-game .k-draw .sec-chip, .v2-game .k-derby .sec-chip, .v2-game .k-nodraw .sec-chip { background: color-mix(in srgb, var(--sec) 24%, var(--surface)); }
 .v2-game .sec-line em { font-weight: 800; }
+.v2-foot .sec-quiet { margin-left: auto; font-size: 11.5px; }
 .rival-chip { font: 600 13.5px/1 var(--body); padding: 6px 11px 6px 6px; }
 .rival-more summary { color: var(--ink); }
 

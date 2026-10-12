@@ -521,13 +521,14 @@ function secadorView(r) {
   }));
   const ready = state.table?.mode === 'jogos' && !got?.failed;
   const summary = secadorSummary({ team, objective, base: mine?.base || null, verdicts, zones: state.zones, ready, rivals: rivals.size });
-  // Jogo sem linha leva só o tipo (a v2 apaga um pouco os que não importam).
+  // Jogo sem linha ganha só um aviso discreto, para ficar claro que o secador olhou o jogo
+  // (a v2 ainda apaga um pouco os que não importam).
   const lines = new Map();
   for (const { ev, v } of verdicts) {
     if (!v) continue;
-    lines.set(ev.id, v.shown
-      ? { kind: v.kind, good: v.state === 'ok', ...verdictText(ev, v, { objective, zones: state.zones }) }
-      : { kind: v.kind === 'mine' ? 'mine' : 'none' });
+    if (v.shown) lines.set(ev.id, { kind: v.kind, good: v.state === 'ok', ...verdictText(ev, v, { objective, zones: state.zones }) });
+    else if (v.kind === 'mine') lines.set(ev.id, { kind: 'mine' });
+    else lines.set(ev.id, { kind: 'none', quiet: v.kind === 'none' ? 'Tanto faz pra você' : 'Pesa pouco pra você' });
   }
   return { on: true, team, rivals: rivalNames, summary, lines };
 }

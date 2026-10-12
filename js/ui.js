@@ -87,7 +87,7 @@ export function matchCard(ev, ctx) {
       aria-label="${esc(`${ev.home.name} ${ev.home.score ?? ''} x ${ev.away.score ?? ''} ${ev.away.name}, ${label}. Toque para ver detalhes.`)}">
       <div class="status">${status}</div>
       <div class="teams">${row(ev.home, 'home')}${row(ev.away, 'away')}</div>
-      <div class="match-foot">${left}${ctx.note ? `<span class="foot-note">${esc(ctx.note)}</span>` : ev.moved ? `<span class="foot-note">${ev.status.kind === 'post' ? 'Jogo remarcado' : 'Remarcado'}</span>` : ''}</div>
+      <div class="match-foot">${left}${ctx.note ? `<span class="foot-note">${esc(ctx.note)}</span>` : ev.moved ? `<span class="foot-note">${ev.status.kind === 'post' ? 'Jogo remarcado' : 'Remarcado'}</span>` : ctx.secador?.quiet ? `<span class="foot-note sec-quiet">${esc(ctx.secador.quiet)}</span>` : ''}</div>
       ${secadorLine(ctx.secador)}
     </article>`;
 }
@@ -186,7 +186,7 @@ export const favoriteHint = () => `
 const DRYER = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 6.5A4.5 4.5 0 0 1 7.5 2H15a3 3 0 0 1 3 3v3a3 3 0 0 1-3 3h-2.2l-1.1 6.4a1.4 1.4 0 0 1-1.4 1.1H9a1.2 1.2 0 0 1-1.2-1.3l.5-6.2h-.8A4.5 4.5 0 0 1 3 6.5zm4.5-1.7a1.7 1.7 0 1 0 0 3.4 1.7 1.7 0 0 0 0-3.4z" fill="currentColor" fill-rule="evenodd"/><path d="M19.6 4.2h1.9M19.6 6.5h2.4M19.6 8.8h1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 // Pregador de roupa, para o nariz tapado.
 const PIN = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M8 2.5l3.2 9.2M16 2.5l-3.2 9.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M9.7 10.5h4.6a2.2 2.2 0 0 1 2.2 2.2v6.6a2.2 2.2 0 0 1-2.2 2.2H9.7a2.2 2.2 0 0 1-2.2-2.2v-6.6a2.2 2.2 0 0 1 2.2-2.2zm2.3 2.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z" fill="currentColor" fill-rule="evenodd"/></svg>';
-const SEC_ICON = { help: DRYER, rival: DRYER, pride: DRYER, double: DRYER + DRYER, nose: PIN };
+const SEC_ICON = { help: DRYER, rival: DRYER, pride: DRYER, draw: DRYER, nodraw: DRYER, derby: DRYER, double: DRYER + DRYER, nose: PIN };
 
 /**
  * Linha do secador embaixo de um jogo. s: {kind, chip, text, state, good} (frases de verdictText em

@@ -462,9 +462,10 @@ main {
   white-space: nowrap;
 }
 .k-nose .sec-chip { background: var(--nose); color: var(--nose-ink); }
-.k-draw .sec-chip, .k-derby .sec-chip, .k-nodraw .sec-chip { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.k-draw .sec-chip, .k-derby .sec-chip, .k-nodraw .sec-chip { background: color-mix(in srgb, var(--sec) 22%, var(--surface)); color: var(--ink); box-shadow: inset 0 0 0 1px var(--sec); }
 .k-mine .sec-chip { background: var(--ink); color: var(--surface); }
 .sec-line em { font-style: normal; font-weight: 700; white-space: nowrap; }
+.foot-note.sec-quiet { font-weight: 500; color: var(--muted); }
 .sec-ok { color: var(--good); }
 .sec-no { color: var(--live); }
 .rival-chips { display: flex; flex-wrap: wrap; gap: 6px; }

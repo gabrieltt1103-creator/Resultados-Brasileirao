@@ -100,6 +100,7 @@ export function pct(p) {
 
 const RESULT = [1, 0, -1]; // posição nas listas de chances: vitória do mandante, empate, vitória do visitante
 const PLAIN = ['help', 'draw', 'nodraw'];
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 
 // No sentido bom: chance de título e de G sobem, risco de cair desce.
 const goodOf = (objective, values) => (objective === 'z' ? values.map((p) => 1 - p) : values);
@@ -278,9 +279,16 @@ function rivalGain(t, s, zones) {
   return `deixaria ${o(t.name)} mais perto do ${s.objective === 'title' ? 'título' : zones?.gLabel || 'G6'}`;
 }
 
+// "a chance de título dele", "o risco de cair dele": a chance de um time, para as frases do jogo encerrado.
+function chanceOf(objective, zones, owner = '') {
+  const of = owner ? ` ${owner}` : '';
+  if (objective === 'z') return `o risco de cair${of}`;
+  return `a chance de ${objective === 'title' ? 'título' : zones?.gLabel || 'G6'}${of}`;
+}
+
 /**
  * Selo e frase de um jogo. Devolve {chip, text, state} (state: frase curta de ao vivo ou encerrado).
- * Jogo encerrado fica só com a conta e se deu certo, sem pedir torcida.
+ * Jogo encerrado não pede torcida: diz o que o resultado fez (a conta, ou onde ficou a chance).
  * objective: objetivo do time do torcedor; zones: zonas da tabela (para o nome do G).
  */
 export function verdictText(ev, v, { objective, zones } = {}) {
@@ -291,11 +299,19 @@ export function verdictText(ev, v, { objective, zones } = {}) {
   const nums = v.best != null ? numbers(ev, v, objective, zones) : '';
   const cheer = v.cheer?.name;
   const dry = v.dry?.name;
+  const now = outcome(ev);
+  // Resultado de um time no jogo encerrado: 1 vitória, 0 empate, -1 derrota.
+  const resultOf = (t) => (now == null ? null : t.id === ev.home.id ? now : -now);
   switch (v.kind) {
     case 'mine': {
       const chip = v.rival ? 'Clássico' : 'Seu jogo';
       if (!v.values) return { chip, text: v.rival ? 'Vale mais que três pontos.' : '', state: '' };
       const [h, d, a] = v.values;
+      if (done && now != null) {
+        const r = v.home ? now : -now;
+        const p = v.values[RESULT.indexOf(now)];
+        return { chip, text: `Com ${r > 0 ? 'a vitória' : r < 0 ? 'a derrota' : 'o empate'}, ${chanceOf(objective, zones)} ficou em ${pct(p)}.`, state: '' };
+      }
       const [win, lose] = v.home ? [h, a] : [a, h];
       return { chip, text: `${GOAL[objective](zones)}: ${pct(win)} se vencer, ${pct(d)} se empatar, ${pct(lose)} se perder.`, state: '' };
     }
@@ -307,7 +323,13 @@ export function verdictText(ev, v, { objective, zones } = {}) {
       if (done) return { chip: 'Nariz tapado', text: `${nums}${v.state === 'ok' ? ` Dessa vez, foi bom ${o(cheer)} vencer.` : ''}`, state };
       return { chip: 'Nariz tapado', text: `Dessa vez, torça ${pelo(cheer)}, seu rival. ${nums}${v.both ? ` Pelo menos ${o(dry)} perde.` : ''} Ninguém precisa saber.`, state };
     case 'pride':
-      if (done) return { chip: `Seque ${o(dry)}`, text: '', state };
+      if (done) {
+        return {
+          chip: `Seque ${o(dry)}`,
+          text: v.state === 'ok' ? `${cap(o(dry))} não venceu: secada cumprida.` : `${cap(o(dry))} venceu. Pelo menos ajudou um pouquinho ${YOUR[objective](zones)}.`,
+          state,
+        };
+      }
       return {
         chip: `Seque ${o(dry)}`,
         text: v.stake
@@ -319,10 +341,17 @@ export function verdictText(ev, v, { objective, zones } = {}) {
       return { chip: 'Torça pelo empate', text: `${nums}${done ? '' : v.both ? ' E os dois rivais perdem pontos.' : v.rival ? ' E o rival ainda perde pontos.' : ''}`, state };
     case 'nodraw':
       return { chip: 'Tem que ter vencedor', text: done ? nums : `Tanto faz quem vença: o empate é o pior para você. ${nums}`, state };
-    case 'derby':
-      return { chip: 'Clássico dos rivais', text: done ? '' : 'Torça pelo empate: os dois perdem pontos.', state };
-    case 'rival':
-      return { chip: `Seque ${o(dry)}`, text: done ? '' : `Torça ${pelo(cheer)}. ${rivalLoss(v.dry, v.stake, zones)}`, state };
+    case 'derby': {
+      if (!done) return { chip: 'Clássico dos rivais', text: 'Torça pelo empate: os dois perdem pontos.', state };
+      const winner = now > 0 ? ev.home : now < 0 ? ev.away : null;
+      return { chip: 'Clássico dos rivais', text: winner ? `${cap(o(winner.name))} venceu; o melhor era o empate.` : 'Empate: os dois rivais perderam pontos.', state };
+    }
+    case 'rival': {
+      if (!done) return { chip: `Seque ${o(dry)}`, text: `Torça ${pelo(cheer)}. ${rivalLoss(v.dry, v.stake, zones)}`, state };
+      const r = resultOf(v.dry);
+      const p = r > 0 ? v.stake.win : r < 0 ? v.stake.lose : v.stake.draw;
+      return { chip: `Seque ${o(dry)}`, text: `${cap(o(dry))} ${r > 0 ? 'venceu' : r < 0 ? 'perdeu' : 'empatou'}: ${chanceOf(v.stake.objective, zones, dele(dry))} ficou em ${pct(p)}.`, state };
+    }
     default:
       return { chip: '', text: '', state: '' };
   }

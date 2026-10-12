@@ -654,10 +654,18 @@ function renderSim() {
     oddsBase: state.oddsBase,
     oddsNote,
     favorite: state.favorite,
-    finished: isFinished(r),
+    // A rodada só acabou para o simulador quando todos os jogos terminaram (adiado ainda vai ser jogado).
+    finished: r.events.every((e) => e.status.kind === 'post'),
+    postponed: postponedElsewhere(r).map((e) => ({ ev: e, label: roundName(state.roundOf.get(e.id)) })),
     picksOf: (e) => (m && e.status.kind !== 'post' ? matchPicks(m, e) : null),
     open: state.open,
   });
+}
+
+// Jogos adiados ainda sem data que são de outras rodadas: aparecem no simulador de qualquer rodada,
+// para quem quer simular o campeonato até o fim não ficar com um jogo faltando.
+function postponedElsewhere(r) {
+  return sortEvents(eventList()).filter((e) => e.status.kind === 'off' && !r.events.includes(e) && state.roundOf.has(e.id));
 }
 
 // Gols por jogo no campeonato, com os jogos encerrados (só com a temporada completa).
@@ -861,7 +869,7 @@ function handleAction(btn) {
   } else if (action === 'sim-suggest') {
     const r = state.rounds[state.roundIdx];
     const m = currentModel();
-    for (const e of r?.events || []) if (e.status.kind !== 'post') state.sims[e.id] = suggestScore(m, e);
+    for (const e of [...(r?.events || []), ...(r ? postponedElsewhere(r) : [])]) if (e.status.kind !== 'post') state.sims[e.id] = suggestScore(m, e);
     simChanged();
   } else if (action === 'simulate' && ev) {
     closeSheet();

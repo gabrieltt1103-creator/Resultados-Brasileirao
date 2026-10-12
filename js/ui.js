@@ -618,13 +618,13 @@ const short = (t) => (t.name.length <= 9 ? t.name : t.abbr || t.name);
 
 const pctShort = (p) => (p < 0.01 ? '<1%' : `${Math.round(p * 100)}%`);
 
-function simCard(ev, sim, mp) {
+function simCard(ev, sim, mp, note = '') {
   const s = ev.status;
   const final = s.kind === 'post';
   let status;
   if (final) status = 'FIM';
   else if (s.kind === 'live') status = `${esc(s.label)}<span class="pulse" aria-hidden="true"></span>`;
-  else if (s.kind === 'off') status = `<small>${esc(s.label)}</small>`;
+  else if (s.kind === 'off') status = `<small>${esc(s.label)}</small>${note ? `<small>${esc(note)}</small>` : ''}`;
   else status = `${esc(weekdayShort(ev.date))}<small>${esc(fmtTime.format(ev.date))}</small>`;
   const value = (side) => (sim ? sim[side] : s.kind === 'live' ? (side === 'h' ? ev.home.score : ev.away.score) : null);
   const row = (t, side) => `
@@ -717,7 +717,7 @@ const HOW = `<details class="how" data-keep="how-odds"%OPEN%>
  * real: tabela atual (sem simulações); sim: tabela com as simulações; odds/oddsBase: chances com e sem simulações.
  * open: blocos recolhíveis que o usuário deixou abertos.
  */
-export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished, picksOf = () => null, open = {} }) {
+export function simView({ round, roundLabel, sims, real, sim, zones, impact, odds, oddsBase, oddsNote, favorite, finished, postponed = [], picksOf = () => null, open = {} }) {
   const count = round.events.filter((e) => sims[e.id]).length;
   const total = Object.keys(sims).length;
   const head = `
@@ -734,6 +734,11 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
     ? `<p class="empty">Esta rodada já terminou. Use as setas no topo para ir a uma rodada que ainda vai acontecer.</p>`
     : `<div class="sim-list">${round.events.filter((e) => e.status.kind !== 'post').map((e) => simCard(e, sims[e.id], picksOf(e))).join('')}</div>
       ${doneList(round.events.filter((e) => e.status.kind === 'post'), open['sim-done'])}`;
+  const later = postponed.length ? `
+    <section class="block">
+      <h2 class="section-title">${postponed.length === 1 ? 'Jogo adiado' : 'Jogos adiados'} <small>ainda sem data, de outras rodadas</small></h2>
+      <div class="sim-list">${postponed.map(({ ev, label }) => simCard(ev, sims[ev.id], picksOf(ev), label)).join('')}</div>
+    </section>` : '';
   const impactHtml = sim && real ? `
     <section class="block">
       <h2 class="section-title">${total ? 'Com esses placares' : 'Tabela agora'}</h2>
@@ -748,7 +753,7 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
       <p class="chart-note">${esc(oddsNote)}</p>
       ${odds ? how : ''}
     </section>`;
-  return head + games + impactHtml + oddsHtml;
+  return head + games + later + impactHtml + oddsHtml;
 }
 
 // ---------- status dos dados ----------

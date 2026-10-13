@@ -90,7 +90,7 @@ export function matchCard(ev, ctx) {
   const flash = ctx.flash;
   const lost = (side) => post && (side === 'home' ? ev.home.score < ev.away.score : ev.away.score < ev.home.score);
   const side = (t, key) => {
-    const reds = ev.incidents.filter((i) => i.kind === 'red' && i.team === t.id).length;
+    const reds = ev.incidents.filter((i) => i.kind === 'red' && !i.staff && i.team === t.id).length;
     const rank = ctx.rank(t.id);
     return `<div class="v2-side${key === 'away' ? ' r' : ''}${lost(key) ? ' lost' : ''}" style="--kit:${kit(t)}">
       ${crest(t.logo, t.name, 26)}
@@ -346,7 +346,7 @@ const STAT_DEFS = [
 
 // Linha do jogo: gols do mandante em cima, do visitante embaixo, de 0 aos 90 e os acréscimos.
 function track(ev) {
-  const marks = ev.incidents.filter((i) => i.kind === 'goal' || i.kind === 'red');
+  const marks = ev.incidents.filter((i) => i.kind === 'goal' || (i.kind === 'red' && !i.staff));
   const minute = (m) => (m.base == null ? null : m.base >= 90 ? m.base + m.extra : Math.min(m.base, 90));
   let now = null;
   if (ev.status.kind === 'live') now = ev.status.half ? 45 : parseInt(ev.status.label, 10) || null;
@@ -371,10 +371,10 @@ function lances(ev) {
     const home = i.team === ev.home.id;
     const extra = i.kind === 'red' ? ' <small>(vermelho)</small>' : `${i.pen ? ' <small>(pênalti)</small>' : ''}${i.og ? ' <small>(contra)</small>' : ''}`;
     const ico = i.kind === 'red' ? '<i class="card-ico red"></i>' : `<i class="v2-ball ${home ? 'h' : 'a'}"></i>`;
-    const who = esc(i.who || (i.kind === 'goal' ? 'Gol' : 'Cartão vermelho'));
+    const who = esc(i.who || (i.kind === 'goal' ? 'Gol' : i.staff ? 'Comissão técnica' : 'Cartão vermelho'));
     return `<div class="v2-tl"><span class="l">${home ? `${who}${extra}${ico}` : ''}</span><span class="m">${esc(i.min.label)}</span><span class="r">${home ? '' : `${ico}${who}${extra}`}</span></div>`;
   });
-  const y = (t) => ev.incidents.filter((i) => i.kind === 'yellow' && i.team === t.id).length;
+  const y = (t) => ev.incidents.filter((i) => i.kind === 'yellow' && !i.staff && i.team === t.id).length;
   const yh = y(ev.home);
   const ya = y(ev.away);
   const cards = yh + ya ? `<p class="v2-cap muted">Cartões amarelos: ${yh} para ${o(ev.home.name)}, ${ya} para ${o(ev.away.name)}.</p>` : '';

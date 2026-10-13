@@ -64,7 +64,7 @@ export function matchCard(ev, ctx) {
     const scored = flash && flash.sides.has(key);
     const score = s.kind === 'pre' || s.kind === 'off' || t.score == null ? '–' : t.score;
     const goals = ev.incidents.filter((i) => i.kind === 'goal' && i.team === t.id);
-    const reds = ev.incidents.filter((i) => i.kind === 'red' && i.team === t.id).length;
+    const reds = ev.incidents.filter((i) => i.kind === 'red' && !i.staff && i.team === t.id).length;
     return `
       <div class="team ${result}">
         ${crest(t.logo, t.name)}
@@ -426,7 +426,7 @@ function timeline(ev) {
   for (const i of ev.incidents) {
     if (!shownBreak && i.min.base > 45) { items.push('<li class="tl-break">Intervalo</li>'); shownBreak = true; }
     const side = i.team === ev.home.id ? 'home' : 'away';
-    const name = esc(i.who || (i.kind === 'goal' ? 'Gol' : i.kind === 'red' ? 'Cartão vermelho' : 'Cartão amarelo'));
+    const name = esc(i.who || (i.kind === 'goal' ? 'Gol' : i.staff ? 'Comissão técnica' : i.kind === 'red' ? 'Cartão vermelho' : 'Cartão amarelo'));
     const extra = i.kind === 'goal' ? `${i.pen ? ' <small>(pênalti)</small>' : ''}${i.og ? ' <small>(contra)</small>' : ''}` : '';
     items.push(`<li class="tl tl-${side} tl-${i.kind}"><span class="tl-min">${esc(i.min.label)}</span><span class="tl-ico">${ICON[i.kind]}</span><span class="tl-txt">${name}${extra}</span></li>`);
   }

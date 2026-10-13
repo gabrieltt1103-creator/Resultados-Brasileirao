@@ -121,6 +121,8 @@ export function parseEvent(e) {
       who: (a?.displayName && a.displayName.length <= 14 ? a.displayName : a?.shortName || a?.displayName) || '',
       pen: !!d.penaltyKick,
       og: !!d.ownGoal,
+      // Cartão sem jogador: técnico ou alguém da comissão técnica (o time não fica com um a menos).
+      staff: kind !== 'goal' && !a,
     });
   }
   incidents.sort((x, y) => x.min.sort - y.min.sort);
@@ -207,6 +209,8 @@ const SCORER = /^Goal![^.]*\.\s+([^().!]+?)\s*\(/i;
 const WHO_IN = {
   'deleted-after-review': /:\s*([^():!]+?)\s*\(/, 'penalty---missed': PENALTY, 'penalty---saved': PENALTY,
   goal: SCORER, 'goal---header': SCORER, 'goal---volley': SCORER, 'goal---free-kick': SCORER, 'penalty---scored': SCORER, 'own-goal': /^Own Goal by ([^,(]+?)\s*[,(]/i,
+  // "Wallace Yan (RB Bragantino) is shown the red card." e "Arthur Chaves went off injured after Botafogo had used all subs."
+  'red-card': /^([^():!.]+?)\s*\(/, retired: /^(.+?)\s+went off injured/i,
 };
 const KEEPER = /saved\b.*\bby\s+([^():!]+?)\s*\(/i;
 const shortName = (name) => {
@@ -220,7 +224,8 @@ const shortName = (name) => {
  * [{type, side, period, base, extra, x, t, who, keeper}].
  * side: 'home' ou 'away' (null em lances sem time, como o apito inicial); x: posição no campo no
  * sentido do ataque de quem fez o lance (0 = o próprio gol, 100 = o gol adversário); who: autor do gol
- * (ou do gol contra), do gol anulado pelo VAR ou do pênalti perdido; keeper: goleiro que defendeu o pênalti.
+ * (ou do gol contra), do gol anulado pelo VAR, do pênalti perdido, do expulso ou de quem saiu machucado sem
+ * substituições; keeper: goleiro que defendeu o pênalti.
  */
 export function parseSummaryPlays(json) {
   const side = new Map();

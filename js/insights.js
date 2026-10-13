@@ -222,8 +222,8 @@ export function roundStats(round) {
     }
     if (h + a >= 3 && (!st.mostGoals || h + a > st.mostGoals.total)) st.mostGoals = { ev, total: h + a };
     for (const i of ev.incidents) {
-      if (i.kind === 'red') st.reds++;
-      if (i.kind === 'yellow') st.yellows++;
+      if (i.kind === 'red' && !i.staff) st.reds++;
+      if (i.kind === 'yellow' && !i.staff) st.yellows++;
       if (i.kind !== 'goal') continue;
       if (i.min.base != null) { st.buckets[bucketOf(i.min.base)]++; st.timed++; }
       if (i.og || !i.who) continue;
@@ -530,13 +530,20 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   // Lances do jogo, em ordem, com o tempo de cada um.
   const events = [];
   for (const g of goals || []) events.push({ kind: 'goal', side: sideOf(g.team), min: g.min, half: halfOf(g.min), g });
-  for (const r of ev.incidents.filter((i) => i.kind === 'red')) events.push({ kind: 'red', side: sideOf(r.team), min: r.min, half: halfOf(r.min), who: r.who });
+  for (const r of ev.incidents.filter((i) => i.kind === 'red')) {
+    // Vermelho sem jogador é do técnico ou da comissão técnica, a não ser que o lance a lance mostre um jogador expulso.
+    const side = sideOf(r.team);
+    const shown = (plays || []).find((p) => p.type === 'red-card' && p.side === side && Math.abs(p.base + p.extra - minuteOf(r.min)) <= 2);
+    events.push({ kind: r.staff && !shown ? 'staff' : 'red', side, min: r.min, half: halfOf(r.min), who: r.who || shown?.who || '' });
+  }
   for (const p of plays || []) {
     if (!p.side) continue;
     const min = { base: p.base, extra: p.extra, period: p.period };
     if (p.type === 'deleted-after-review') events.push({ kind: 'var', side: p.side, min, half: p.period, who: p.who });
     if (/^penalty---(missed|saved)$/.test(p.type)) events.push({ kind: 'pen', side: p.side, min, half: p.period, who: p.who, keeper: p.keeper });
     if (p.type === 'shot-hit-woodwork') events.push({ kind: 'wood', side: p.side, min, half: p.period });
+    // Machucado depois das cinco substituições: o time fica com um a menos.
+    if (p.type === 'retired') events.push({ kind: 'hurt', side: p.side, min, half: p.period, who: p.who });
   }
   const order = (e) => e.half * 1000 + (e.min.base ?? 0) + (e.min.extra || 0) / 100;
   events.sort((x, y) => order(x) - order(y));
@@ -550,7 +557,7 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   for (const e of events) {
     e.diff = e.side === 'home' ? sh - sa : sa - sh;
     e.total = sh + sa;
-    if (e.kind === 'red') e.n = ++reds[e.side];
+    if (e.kind === 'red' || e.kind === 'hurt') e.n = ++reds[e.side];
     e.down = reds[e.side] - reds[other(e.side)];
     if (e.kind !== 'goal') continue;
     if (e.side === 'home') sh++; else sa++;
@@ -706,6 +713,10 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
         const text = `ficou com ${e.n > 1 ? 'dois' : 'um'} a menos aos ${min}${e.who ? `, com a expulsão de ${e.who}` : ''}`;
         if (fresh && lead === e.side) { out[0] += `, mas ${text}`; subj = e.side; inSentence = 0; } else if (prev?.kind === 'red' && prev.side === e.side) out[out.length - 1] += `, e com ${e.n > 2 ? 'mais um' : 'dois'} a menos aos ${min}${e.who ? `, com a expulsão de ${e.who}` : ''}`;
         else push(`${pre}${who(e.side)}${text}`, e.side);
+      } else if (e.kind === 'staff') {
+        push(`${pre}a comissão técnica ${doo(T(e.side).name)} levou um vermelho aos ${min}, sem tirar jogador de campo`, null);
+      } else if (e.kind === 'hurt') {
+        push(`${pre}${who(e.side)}ficou com ${e.n > 1 ? 'dois' : 'um'} a menos aos ${min}: ${e.who ? `${e.who} saiu machucado` : 'um jogador saiu machucado'} e não havia mais substituições`, e.side);
       } else if (e.kind === 'pen') {
         const next = ORD[(e.total + e.diff) / 2 + 1]; // o gol que seria do time com o pênalti
         const aim = e.diff < -1 ? 'diminuir' : e.diff === -1 ? 'empatar' : e.diff > 0 ? ((e.total + e.diff) / 2 >= 2 && next ? `fazer o ${next}` : 'ampliar') : e.total ? 'desempatar' : 'abrir o placar';

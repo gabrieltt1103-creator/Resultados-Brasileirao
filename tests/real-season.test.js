@@ -210,3 +210,27 @@ test('leitura ao vivo: 3 a 0 com pressão parecida não é "jogo equilibrado"', 
     'O Athletico-PR finaliza bem menos, mas acertou quase tudo o que chutou. A Chapecoense continua em cima, tentando diminuir.',
   ]);
 });
+
+test('vermelho sem jogador é da comissão técnica: o time segue com onze', () => {
+  const raw = structuredClone(goleadaAoVivo.evento);
+  const home = raw.competitions[0].competitors.find((c) => c.homeAway === 'home').team.id;
+  raw.competitions[0].details.push({ type: { text: 'Red Card' }, clock: { value: 3000, displayValue: "50'" }, team: { id: home }, redCard: true, yellowCard: false, scoringPlay: false });
+  const ev = parseEvent(raw);
+  assert.ok(ev.incidents.find((i) => i.kind === 'red').staff);
+  const plays = parseSummaryPlays(goleadaAoVivo.resumo);
+  const text = matchReading(ev, { plays, flow: matchFlow(plays, liveClock(ev)) }).join(' ');
+  assert.match(text, /A comissão técnica da Chapecoense levou um vermelho aos 50', sem tirar jogador de campo\./);
+  assert.doesNotMatch(text, /um a menos|um a mais/);
+  // Se o lance a lance mostra um jogador expulso no mesmo minuto, é jogador.
+  const shown = [...plays, { type: 'red-card', side: 'home', period: 2, base: 50, extra: 0, who: 'Marcinho' }];
+  assert.match(matchReading(ev, { plays: shown, flow: matchFlow(shown, liveClock(ev)) }).join(' '), /ficou com um a menos aos 50', com a expulsão de Marcinho/);
+  // Machucado depois das cinco substituições também deixa o time com um a menos.
+  const json = {
+    header: { competitions: [{ competitors: [{ homeAway: 'home', team: { displayName: 'Botafogo' } }, { homeAway: 'away', team: { displayName: 'Vasco da Gama' } }] }] },
+    commentary: [
+      { time: { displayValue: "39'" }, text: 'Luis Osorio (Botafogo) is shown the red card.', play: { type: { type: 'red-card' }, team: { displayName: 'Botafogo' }, period: { number: 1 } } },
+      { time: { displayValue: "90'+1'" }, text: 'Arthur Chaves went off injured after Botafogo had used all subs.', play: { type: { type: 'retired' }, team: { displayName: 'Botafogo' }, period: { number: 2 } } },
+    ],
+  };
+  assert.deepEqual(parseSummaryPlays(json).map((p) => `${p.type}:${p.side}:${p.who}`), ['red-card:home:Luis Osorio', 'retired:home:Arthur Chaves']);
+});

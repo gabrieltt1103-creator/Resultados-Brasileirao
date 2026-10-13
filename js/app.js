@@ -935,15 +935,71 @@ function toggleRival(id) {
 }
 
 // ---------- avisos ----------
-function toast(html, matchId) {
-  const t = document.createElement(matchId ? 'button' : 'div');
+function toast(html, matchId, { action = null, ms = 6000 } = {}) {
+  const t = document.createElement(matchId || action ? 'button' : 'div');
   t.className = 'toast';
-  if (matchId) { t.type = 'button'; t.dataset.match = matchId; }
+  if (matchId || action) t.type = 'button';
+  if (matchId) t.dataset.match = matchId;
+  if (action) t.dataset.action = action;
   t.innerHTML = html;
   el.toasts.prepend(t);
   while (el.toasts.children.length > 3) el.toasts.lastChild.remove();
-  setTimeout(() => t.classList.add('out'), 6000);
-  setTimeout(() => t.remove(), 6500);
+  setTimeout(() => t.classList.add('out'), ms);
+  setTimeout(() => t.remove(), ms + 500);
+}
+
+// ---------- versão nova do app ----------
+// O GitHub Pages marca todos os arquivos com a hora da publicação (Last-Modified). Quando o servidor tem
+// uma publicação mais nova que a página aberta (comum no celular, onde a aba fica aberta por horas ou volta
+// do cache ao reabrir), o app baixa os arquivos novos e recarrega, reabrindo o jogo ou time que estava na tela.
+// Ao abrir o app ou voltar para ele, atualiza sozinho; com o app em uso, avisa e atualiza com um toque.
+const BUILT = Date.parse(document.lastModified);
+const VERSION_MS = 5 * 60e3;
+const TRIED_KEY = 'versao-tentada';
+const REOPEN_KEY = 'reabrir';
+const session = {
+  get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch { /* sem sessão */ } },
+};
+
+async function checkVersion({ auto = false } = {}) {
+  if (!Number.isFinite(BUILT) || state.update?.busy || Date.now() - (state.update?.t || 0) < 30e3) return;
+  state.update = { t: Date.now() };
+  let served = NaN;
+  try {
+    const res = await fetch(location.pathname, { method: 'HEAD', cache: 'no-store' });
+    if (res.ok) served = Date.parse(res.headers.get('last-modified') || '');
+  } catch { return; }
+  // Mesma publicação, ou uma que já foi tentada nesta aba (servidor ainda entregando a antiga): nada a fazer.
+  if (!Number.isFinite(served) || served - BUILT < 2000 || session.get(TRIED_KEY) === String(served)) return;
+  state.update.served = served;
+  if (auto) updateNow();
+  else toast('<b class="tag tone-good">Novidade</b><span class="toast-body"><span>Saiu uma versão nova do app</span><small>Toque para atualizar</small></span>', null, { action: 'update', ms: 15000 });
+}
+
+async function updateNow() {
+  if (!state.update?.served || state.update.busy) return;
+  state.update.busy = true;
+  session.set(TRIED_KEY, String(state.update.served));
+  session.set(REOPEN_KEY, state.sheet ? JSON.stringify({ type: state.sheet.type, id: state.sheet.id }) : null);
+  // Troca no cache do navegador os arquivos do app (inclusive os do cálculo em segundo plano) antes de recarregar.
+  const files = new Set(performance.getEntriesByType('resource').map((r) => r.name)
+    .filter((u) => u.startsWith(location.origin) && /\.(js|css|webmanifest)([?#]|$)/.test(u)));
+  for (const f of ['odds-worker.js', 'sim.js']) files.add(new URL(f, import.meta.url).href);
+  await Promise.all([...files].map((u) => fetch(u, { cache: 'reload' }).catch(() => null)));
+  location.reload();
+}
+
+// Depois de atualizar: volta ao jogo ou time que estava aberto.
+function reopenAfterUpdate() {
+  const raw = session.get(REOPEN_KEY);
+  if (!raw) return;
+  session.set(REOPEN_KEY, null);
+  try {
+    const spec = JSON.parse(raw);
+    if (spec?.type === 'match' && state.events.has(spec.id)) openSheet(spec);
+    else if (spec?.type === 'team') openSheet(spec);
+  } catch { /* nada a reabrir */ }
 }
 
 function flushAlerts() {
@@ -1023,6 +1079,8 @@ function handleAction(btn) {
   } else if (action === 'sim-set' && ev && ev.status.kind !== 'post') {
     state.sims[id] = { h: Number(btn.dataset.h), a: Number(btn.dataset.a) };
     simChanged();
+  } else if (action === 'update') {
+    updateNow();
   } else if (action === 'sim-reset') {
     delete state.sims[id];
     simChanged();
@@ -1146,9 +1204,14 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { clearTimeout(state.timer); return; }
   if (Date.now() - state.lastOk > 15e3) tick({ warm: true }); else schedule();
   renderFreshness();
+  checkVersion({ auto: true });
 });
 window.addEventListener('online', () => tick({ warm: true }));
-setInterval(() => { if (!document.hidden) safe('o topo', renderFreshness); }, 5e3);
+setInterval(() => {
+  if (document.hidden) return;
+  safe('o topo', renderFreshness);
+  if (Date.now() - (state.update?.t || 0) > VERSION_MS) checkVersion();
+}, 5e3);
 
 // Blocos recolhíveis (<details data-keep>) continuam abertos depois de cada atualização da tela.
 document.addEventListener('toggle', (e) => {
@@ -1163,5 +1226,6 @@ setSoundButton();
 // a busca começa e só então a tela é desenhada.
 const cached = loadCache();
 if (cached) safe('a rodada', derive, el.matches);
-tick({ warm: true });
+tick({ warm: true }).then(reopenAfterUpdate);
 if (cached) render();
+setTimeout(() => checkVersion({ auto: true }), 4e3);

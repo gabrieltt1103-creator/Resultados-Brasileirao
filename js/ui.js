@@ -417,20 +417,81 @@ const ICON = {
   goal: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/><path d="M12 7.2l3.6 2.6-1.4 4.2H9.8L8.4 9.8z" fill="currentColor"/></svg>',
   yellow: '<i class="card-ico yellow"></i>',
   red: '<i class="card-ico red"></i>',
+  sub: '<svg class="sub-ico" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="in" d="M5 13V3M2 6l3-3 3 3"/><path class="out" d="M11 3v10M8 10l3 3 3-3"/></svg>',
 };
 
-function timeline(ev) {
-  if (!ev.incidents.length) return '';
+/**
+ * Lances do placar (gols e cartões) com as substituições da escalação, em ordem.
+ * Troca do intervalo vem logo depois do fim do 1º tempo.
+ */
+export function withSubs(ev, lineups) {
+  const subs = (lineups?.subs || []).map((x) => ({ kind: 'sub', team: x.side === 'home' ? ev.home.id : ev.away.id, min: x.min, ht: x.ht, who: x.in, out: x.out }));
+  const key = (i) => (i.ht ? 45.995 : i.min.sort);
+  return [...ev.incidents, ...subs].sort((a, b) => key(a) - key(b));
+}
+
+function timeline(ev, lineups) {
+  const list = withSubs(ev, lineups);
+  if (!list.length) return '';
   let shownBreak = false;
   const items = [];
-  for (const i of ev.incidents) {
-    if (!shownBreak && i.min.base > 45) { items.push('<li class="tl-break">Intervalo</li>'); shownBreak = true; }
+  for (const i of list) {
+    if (!shownBreak && (i.min.base > 45 || i.ht)) { items.push('<li class="tl-break">Intervalo</li>'); shownBreak = true; }
     const side = i.team === ev.home.id ? 'home' : 'away';
     const name = esc(i.who || (i.kind === 'goal' ? 'Gol' : i.staff ? 'Comissão técnica' : i.kind === 'red' ? 'Cartão vermelho' : 'Cartão amarelo'));
-    const extra = i.kind === 'goal' ? `${i.pen ? ' <small>(pênalti)</small>' : ''}${i.og ? ' <small>(contra)</small>' : ''}` : '';
-    items.push(`<li class="tl tl-${side} tl-${i.kind}"><span class="tl-min">${esc(i.min.label)}</span><span class="tl-ico">${ICON[i.kind]}</span><span class="tl-txt">${name}${extra}</span></li>`);
+    const extra = i.kind === 'goal' ? `${i.pen ? ' <small>(pênalti)</small>' : ''}${i.og ? ' <small>(contra)</small>' : ''}`
+      : i.kind === 'sub' ? `<small class="sub-out">sai ${esc(i.out)}</small>` : '';
+    items.push(`<li class="tl tl-${side} tl-${i.kind}"><span class="tl-min">${esc(i.ht ? 'Int.' : i.min.label)}</span><span class="tl-ico">${ICON[i.kind]}</span><span class="tl-txt">${name}${extra}</span></li>`);
   }
   return `<ol class="timeline">${items.join('')}</ol>`;
+}
+
+// ---------- escalações ----------
+
+const BALL = ICON.goal.replace('width="16" height="16"', 'width="13" height="13"');
+// Gols e cartão de cada jogador, logo depois do nome.
+const luMarks = (p) => `${p.goals ? `<span class="lu-ic" title="${p.goals > 1 ? `${p.goals} gols` : 'Gol'}">${BALL.repeat(p.goals)}</span>` : ''}${p.og ? `<span class="lu-ic" title="Gol contra">${BALL}<small>contra</small></span>` : ''}${p.red ? '<i class="card-ico red" title="Vermelho"></i>' : p.yellow ? '<i class="card-ico yellow" title="Amarelo"></i>' : ''}`;
+
+function teamLineup(team, t, coach) {
+  const bench = new Map(t.bench.map((p) => [p.name, p]));
+  // Titular e quem entrou no lugar dele (e no lugar de quem entrou), como na ficha: "Vitinho (Mateo Ponte, 80')".
+  const player = (p) => {
+    const parts = [];
+    let cur = p;
+    for (let guard = 0; cur.out && guard < 4; guard++) {
+      const sub = bench.get(cur.out.other);
+      parts.push(`<span>${esc(cur.out.other || '?')}${sub ? luMarks(sub) : ''}, ${cur.out.ht ? 'no intervalo' : esc(cur.out.min.label)}</span>`);
+      if (!sub) break;
+      cur = sub;
+    }
+    return `<span class="lu-p">${esc(p.name)}${luMarks(p)}</span>${parts.length ? ` <span class="lu-sub">(${parts.join('; ')})</span>` : ''}`;
+  };
+  return `<div class="lineup">
+    <div class="lu-head">${crest(team.logo, team.name, 20, 'mini')}<b>${esc(team.name)}</b>${t.formation ? `<span>${esc(t.formation)}</span>` : ''}</div>
+    ${t.lines.map((line) => `<div class="lu-line">${line.map(player).join(', ')}</div>`).join('')}
+    ${t.bench.length ? `<p class="lu-bench"><span class="lu-k">Reservas</span>${t.bench.map((p) => `<span${p.in ? ' class="in"' : ''}>${esc(p.name)}</span>`).join(', ')}</p>` : ''}
+    ${coach ? `<p class="lu-coach"><span class="lu-k">Técnico</span><b>${esc(coach.name)}</b> <small>${esc(coach.src)}</small></p>` : ''}
+  </div>`;
+}
+
+/**
+ * Escalações dos dois times como na ficha técnica: titulares por linha do campo (goleiro, defesa, meio, ataque),
+ * quem entrou no lugar de cada um entre parênteses, reservas e técnico. Antes do anúncio, avisa quando sai
+ * e mostra os técnicos. lineups: parseSummaryLineups; coaches: {home, away} ({name, src} ou null).
+ */
+export function lineupsHtml(ev, lineups, coaches) {
+  if (lineups) return teamLineup(ev.home, lineups.home, coaches?.home) + teamLineup(ev.away, lineups.away, coaches?.away);
+  const pre = ev.status.kind === 'pre' || ev.status.kind === 'off';
+  const known = ['home', 'away'].filter((side) => coaches?.[side]);
+  if (!pre && !known.length) return '';
+  const srcs = [...new Set(known.map((side) => coaches[side].src))];
+  return `${pre ? '<p class="lu-note">As escalações saem cerca de uma hora antes do jogo.</p>' : ''}
+    ${known.length ? `<p class="lu-coach"><span class="lu-k">${known.length > 1 ? 'Técnicos' : 'Técnico'}</span>${known.map((side) => `<b>${esc(coaches[side].name)}</b> (${esc(ev[side].name)})`).join(' e ')} <small>${esc(srcs.join(' e '))}</small></p>` : ''}`;
+}
+
+function lineupsBlock(ev, lineups, coaches) {
+  const html = lineupsHtml(ev, lineups, coaches);
+  return html ? `<section class="sheet-block"><h3 class="sub-title">Escalações</h3>${html}</section>` : '';
 }
 
 function stepper(ev, side, value) {
@@ -510,7 +571,7 @@ function readingBlock(ev, flow, lines) {
   </section>`;
 }
 
-/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, picks, now, flow, reading} */
+/** Detalhe de um jogo. ctx: {table, scen, stats, formById, favorite, story, roundLabel, picks, now, flow, reading, lineups, coaches} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
   const pre = s.kind === 'pre' || s.kind === 'off';
@@ -538,7 +599,8 @@ export function matchSheet(ev, ctx) {
     <p class="sh-meta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="tags center">${tags.map((t) => `<b class="tag tone-gol">${esc(t)}</b>`).join('')}</p>` : ''}
     ${readingBlock(ev, ctx.flow, ctx.reading)}
-    ${ev.incidents.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev)}</section>` : ''}
+    ${ev.incidents.length || ctx.lineups?.subs?.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev, ctx.lineups)}</section>` : ''}
+    ${lineupsBlock(ev, ctx.lineups, ctx.coaches)}
     ${stats ? `<section class="sheet-block"><h3 class="sub-title">Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="chart-note center">Carregando estatísticas…</p>' : '')}
     ${oddsBlock(ev, ctx.picks)}
     ${scenarioBlock(ev, ctx.scen)}

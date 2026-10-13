@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { buildRounds, dropReplaced, pickDefault } from '../js/rounds.js';
-import { parseEvent, parseHeadToHead, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
+import { parseEvent, parseHeadToHead, parseSummaryLineups, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
+import { lineupsHtml, withSubs } from '../js/ui.js';
 import { h2hSummary, liveClock, matchFlow, matchReading } from '../js/insights.js';
 import { computeTable, reconcile, zonesFor } from '../js/table.js';
 import { secador } from '../js/sim.js';
@@ -233,4 +234,47 @@ test('vermelho sem jogador é da comissão técnica: o time segue com onze', () 
     ],
   };
   assert.deepEqual(parseSummaryPlays(json).map((p) => `${p.type}:${p.side}:${p.who}`), ['red-card:home:Luis Osorio', 'retired:home:Arthur Chaves']);
+});
+
+// Bragantino x Cruzeiro (12/10/2026, 2º tempo): escalações reais da ESPN, recortadas.
+const escalacoes = JSON.parse(fs.readFileSync(new URL('./data/bragantino-cruzeiro-escalacoes.json', import.meta.url)));
+
+test('escalações: titulares por linha da formação, trocas, reservas e técnico', () => {
+  const l = parseSummaryLineups(escalacoes);
+  const names = (t) => t.lines.map((line) => line.map((p) => p.name));
+  // 4-2-3-1: goleiro, defesa da direita para a esquerda, volantes, meias e o centroavante.
+  assert.equal(l.home.formation, '4-2-3-1');
+  assert.deepEqual(names(l.home), [
+    ['Tiago Volpi'], ['Ryan Augusto', 'Gustavo Marques', 'Guzmán Rodríguez', 'Juninho Capixaba'], ['Ramires', 'Fabinho'],
+    ['Lucas Barbosa', 'Wallace Yan', 'Fernando'], ['Eduardo Sasha'],
+  ]);
+  assert.equal(l.home.bench.length, 12);
+  const kaio = l.away.lines.flat().find((p) => p.name === 'Kaio Jorge');
+  assert.deepEqual([kaio.goals, kaio.og], [0, 1]);
+  const william = l.away.lines.flat().find((p) => p.name === 'William');
+  assert.ok(william.yellow);
+  assert.deepEqual([william.out.other, william.out.ht], ['Fabrício Bruno', true]);
+  // Trocas em ordem, as do intervalo primeiro.
+  assert.deepEqual(l.subs.slice(0, 3).map((x) => `${x.ht ? 'int' : x.min.label} ${x.in}/${x.out}`), ['int Matías Viña/Gabriel Rojas', 'int Fabrício Bruno/William', "58' Eduardo Santos/Gustavo Marques"]);
+  // Antes do anúncio, a ESPN manda as listas vazias: sem escalação.
+  assert.equal(parseSummaryLineups({ rosters: [{ homeAway: 'home', roster: [] }, { homeAway: 'away', roster: [] }] }), null);
+
+  const ev = { id: '401841260', date: new Date('2026-10-13T00:00Z'), status: { kind: 'live', label: "80'" }, incidents: [],
+    home: { id: '6079', name: 'Bragantino' }, away: { id: '2022', name: 'Cruzeiro' } };
+  const html = lineupsHtml(ev, l, { home: null, away: { name: 'Artur Jorge', src: 'Wikipédia' } });
+  const text = html.replace(/<[^>]+>/g, '').replace(/&#39;/g, "'");
+  assert.match(text, /William \(Fabrício Bruno, no intervalo\), João Marcelo \(Wesley Ribeiro, 63'\), Jonathan Jesus, Gabriel Rojas \(Matías Viña, no intervalo\)/);
+  assert.match(html, /William<i class="card-ico yellow"/);
+  assert.match(html, /Kaio Jorge<span class="lu-ic" title="Gol contra">/);
+  assert.match(html, /Técnico<\/span><b>Artur Jorge<\/b> <small>Wikipédia<\/small>/);
+  assert.equal((html.match(/class="lu-coach"/g) || []).length, 1);
+  // Lance a lance: as trocas entram junto com os gols e cartões, as do intervalo depois do 1º tempo.
+  const list = withSubs({ ...ev, incidents: [{ kind: 'goal', team: '2022', who: 'Zé Lucas', min: { base: 43, extra: 0, label: "43'", sort: 43 } },
+    { kind: 'yellow', team: '6079', who: 'Ryan Augusto', min: { base: 47, extra: 0, label: "47'", sort: 47 } }] }, l);
+  assert.deepEqual(list.slice(0, 4).map((i) => `${i.kind}:${i.who}`), ['goal:Zé Lucas', 'sub:Matías Viña', 'sub:Fabrício Bruno', 'yellow:Ryan Augusto']);
+  // Sem escalação: antes do jogo, avisa quando sai e mostra os técnicos.
+  const pre = lineupsHtml({ ...ev, status: { kind: 'pre' } }, null, { home: { name: 'Vagner Mancini', src: 'Wikipédia' }, away: { name: 'Artur Jorge', src: 'Wikipédia' } });
+  assert.match(pre, /As escalações saem cerca de uma hora antes do jogo/);
+  assert.match(pre, /Técnicos<\/span><b>Vagner Mancini<\/b> \(Bragantino\) e <b>Artur Jorge<\/b> \(Cruzeiro\)/);
+  assert.equal(lineupsHtml({ ...ev, status: { kind: 'post' } }, null, null), '');
 });

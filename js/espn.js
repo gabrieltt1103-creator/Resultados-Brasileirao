@@ -267,6 +267,82 @@ function competitionLabel(name) {
   return [label, year].filter(Boolean).join(' ');
 }
 
+// Escalação: linha do campo de cada posição da ESPN (defesa, volantes, meio, meias, pontas, ataque) e o
+// lado, da direita para a esquerda, como na ficha técnica ("Vitinho, Ferraresi, Arthur Chaves e Alex Telles").
+// O centroavante vem depois dos atacantes de lado: no 3-4-2-1, os "2" são CF-R e CF-L, e o "1" é o F.
+const DEPTH = {
+  RB: 1, LB: 1, RWB: 1, LWB: 1, CD: 1, 'CD-R': 1, 'CD-L': 1, SW: 1,
+  DM: 2, 'DM-R': 2, 'DM-L': 2, CM: 3, 'CM-R': 3, 'CM-L': 3, RM: 3.5, LM: 3.5,
+  AM: 4, 'AM-R': 4, 'AM-L': 4, RW: 4.5, LW: 4.5, SS: 4.8, 'CF-R': 5, 'CF-L': 5, RCF: 5, LCF: 5, RF: 5, LF: 5, F: 5.2, CF: 5.2, ST: 5.2,
+};
+const lateral = (pos) => (/^(RB|RWB|RM|RW|RF)$/.test(pos) ? 0 : /-R$|^RCF$/.test(pos) ? 1 : /-L$|^LCF$/.test(pos) ? 3 : /^(LB|LWB|LM|LW|LF)$/.test(pos) ? 4 : 2);
+const playerName = (a) => (a?.displayName && a.displayName.length <= 16 ? a.displayName : a?.shortName || a?.displayName) || '';
+
+// Titulares em linhas, pela formação ("4-2-3-1": goleiro, 4, 2, 3, 1). Sem formação que feche, pela posição.
+function linesOf(starters, formation) {
+  const gk = starters.find((p) => p.pos === 'G') || [...starters].sort((a, b) => a.place - b.place)[0];
+  const rest = starters.filter((p) => p !== gk).sort((a, b) => (DEPTH[a.pos] ?? 3) - (DEPTH[b.pos] ?? 3) || a.place - b.place);
+  const sizes = String(formation || '').split('-').map(Number);
+  let groups = [];
+  if (sizes.length > 1 && sizes.every((n) => n > 0) && sizes.reduce((a, b) => a + b, 0) === rest.length) {
+    let k = 0;
+    groups = sizes.map((n) => rest.slice(k, (k += n)));
+  } else {
+    for (const p of rest) {
+      const d = Math.floor(DEPTH[p.pos] ?? 3);
+      if (groups.length && groups[groups.length - 1].d === d) groups[groups.length - 1].push(p);
+      else groups.push(Object.assign([p], { d }));
+    }
+  }
+  const byLateral = (a, b) => lateral(a.pos) - lateral(b.pos) || a.place - b.place;
+  return [[gk], ...groups.map((g) => [...g].sort(byLateral))].filter((g) => g.length && g[0]);
+}
+
+/**
+ * Escalações do resumo do jogo, que a ESPN publica perto do início (antes disso, devolve null):
+ * {home, away, subs}. Cada time: {formation, lines: [[jogador]], bench: [jogador]}; jogador:
+ * {name, n, pos, place, goals, og, yellow, red, in, out}, com in/out = {min, ht, other} (quem saiu ou entrou).
+ * subs: as trocas, em ordem, para o lance a lance: [{side, min, ht, in, out}]. ht: troca no intervalo.
+ */
+export function parseSummaryLineups(json) {
+  // Trocas de "45'" feitas já no 2º tempo (o lance a lance diz o tempo): são do intervalo.
+  const htSubs = new Set((json?.commentary || []).filter((c) => c.play?.type?.type === 'substitution' && c.play?.period?.number === 2
+    && /^45'$/.test(c.time?.displayValue || '')).map((c) => c.text || ''));
+  const out = { subs: [] };
+  // Nome de cada jogador como na escalação, para quem entrou e saiu aparecer igual nos dois lugares.
+  const names = new Map();
+  for (const r of json?.rosters || []) for (const p of r.roster || []) if (p.athlete?.id) names.set(String(p.athlete.id), playerName(p.athlete));
+  const nameOf = (a) => names.get(String(a?.id)) || playerName(a);
+  for (const r of json?.rosters || []) {
+    const side = r.homeAway === 'home' || r.homeAway === 'away' ? r.homeAway : null;
+    const roster = Array.isArray(r.roster) ? r.roster : [];
+    if (!side || !roster.some((p) => p.starter)) continue;
+    const players = roster.map((p) => {
+      const plays = Array.isArray(p.plays) ? p.plays : [];
+      const swaps = plays.filter((x) => x.substitution).map((x) => parseMinute(x.clock?.displayValue));
+      const name = playerName(p.athlete);
+      const ht = (m, who) => m?.base === 45 && !m.extra && [...htSubs].some((t) => t.includes(who));
+      const inMin = p.subbedIn ? swaps[0] : null;
+      const outMin = p.subbedOut ? swaps[swaps.length - 1] : null;
+      return {
+        name, n: String(p.jersey ?? ''), pos: p.position?.abbreviation || '', place: Number(p.formationPlace) || 0, starter: !!p.starter,
+        goals: plays.filter((x) => x.didScore && !x.ownGoal).length,
+        og: plays.filter((x) => x.didScore && x.ownGoal).length,
+        yellow: plays.some((x) => x.yellowCard), red: plays.some((x) => x.redCard),
+        in: p.subbedIn ? { min: inMin || parseMinute(''), ht: ht(inMin, p.athlete?.displayName || name), other: nameOf(p.subbedInFor?.athlete) } : null,
+        out: p.subbedOut ? { min: outMin || parseMinute(''), ht: ht(outMin, p.subbedOutFor?.athlete?.displayName || ''), other: nameOf(p.subbedOutFor?.athlete) } : null,
+      };
+    });
+    const starters = players.filter((p) => p.starter);
+    const bench = players.filter((p) => !p.starter).sort((a, b) => (Number(a.n) || 99) - (Number(b.n) || 99));
+    out[side] = { formation: r.formation || '', lines: linesOf(starters, r.formation), bench };
+    for (const p of players) if (p.in) out.subs.push({ side, min: p.in.min, ht: p.in.ht, in: p.name, out: p.in.other });
+  }
+  if (!out.home || !out.away) return null;
+  out.subs.sort((a, b) => (a.ht ? 45.995 : a.min.sort) - (b.ht ? 45.995 : b.min.sort));
+  return out;
+}
+
 /**
  * Últimos confrontos entre os dois times, de qualquer competição, do mais recente para o mais antigo,
  * sem o próprio jogo. Mata-mata decidido nos pênaltis vem com placar igual e um vencedor: pens = 'home' ou 'away'.

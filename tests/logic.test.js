@@ -9,6 +9,7 @@ import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, verdi
 import { statsView, tableCheck } from '../js/ui.js';
 import { chances, matchPicks, model, randomScore, rng, suggestScore } from '../js/sim.js';
 import { parseMinute } from '../js/util.js';
+import { coachFits, parseInfoboxCoach, pickCoach } from '../js/coach.js';
 import * as fx from './fixtures.js';
 
 // Domingo, 11/10/2026, 21h no horário local do teste.
@@ -578,4 +579,32 @@ test('secador: o conselho decidido antes do jogo vale até o fim', () => {
   ];
   pick(list);
   assert.deepEqual(list.map((x) => x.v.shown), [true, false, true, true]);
+});
+
+test('técnico: Wikipédia e Wikidata, com troca recente valendo mais', () => {
+  // Quadro do clube na Wikipédia (HTML real, recortado): o nome sem a referência.
+  const html = '<tr><th scope="row" class="infobox-label">Presidente</th><td class="infobox-data">Osmar Stábile</td></tr><tr><th scope="row" class="infobox-label">Treinador(a)</th>'
+    + '<td class="infobox-data"><a href="/wiki/Fernando_Diniz" title="Fernando Diniz">Fernando Diniz</a><sup id="cite&#95;ref-3" class="reference"><a href="#cite_note-3"><span class="cite-bracket">&#91;</span>2<span class="cite-bracket">&#93;</span></a></sup></td></tr>';
+  assert.equal(parseInfoboxCoach(html), 'Fernando Diniz');
+  assert.equal(parseInfoboxCoach('<tr><th class="infobox-label">Presidente</th><td>X</td></tr>'), null);
+  const now = Date.parse('2026-10-13T01:00Z');
+  // Corinthians: o Wikidata registrou a troca (11/10) depois da última edição da página (07/10).
+  assert.deepEqual(pickCoach({ wiki: { name: 'Fernando Diniz', edited: '2026-10-07T22:53:19Z' }, wikidata: { name: 'Clarence Seedorf', since: '2026-10-11T00:00:00Z' }, now }),
+    { name: 'Clarence Seedorf', src: 'Wikidata', since: '2026-10-11T00:00:00Z' });
+  // Botafogo: a página foi editada depois da data do Wikidata: vale a Wikipédia.
+  assert.equal(pickCoach({ wiki: { name: 'Tite', edited: '2026-10-12T02:37:29Z' }, wikidata: { name: 'Rodrigo Bellão', since: '2026-08-19T00:00:00Z' }, now }).name, 'Tite');
+  // Sem a data da última edição da página, o Wikidata só vence com troca bem recente.
+  assert.equal(pickCoach({ wiki: { name: 'Eduardo Baptista', edited: null }, wikidata: { name: 'Pablo de Toledo', since: '2026-09-20T00:00:00Z' }, now }).name, 'Eduardo Baptista');
+  // Wikipédia fora do ar: só uma troca bem recente; senão, sem resposta (tenta de novo depois).
+  assert.equal(pickCoach({ wiki: null, wikidata: { name: 'Clarence Seedorf', since: '2026-10-11T00:00:00Z' }, now }).name, 'Clarence Seedorf');
+  assert.equal(pickCoach({ wiki: null, wikidata: { name: 'Rodrigo Bellão', since: '2026-08-19T00:00:00Z' }, now }), undefined);
+  // Página sem técnico no quadro e Wikidata antigo demais: sem técnico.
+  assert.equal(pickCoach({ wiki: { name: null, edited: '2026-10-10T00:00:00Z' }, wikidata: { name: 'Fábio Carille', since: '2024-12-19T00:00:00Z' }, now }), null);
+  // Vale para jogo futuro, ao vivo ou encerrado há menos de um dia; nunca antes da contratação.
+  const coach = { name: 'Clarence Seedorf', since: '2026-10-11T00:00:00Z' };
+  const game = (kind, date) => ({ status: { kind }, date: new Date(date) });
+  assert.ok(coachFits(coach, game('pre', '2026-10-18T19:00Z'), now));
+  assert.ok(coachFits(coach, game('post', '2026-10-12T19:00Z'), now));
+  assert.ok(!coachFits(coach, game('post', '2026-10-11T19:00Z'), now + 2 * 864e5));
+  assert.ok(!coachFits(coach, game('post', '2026-10-08T19:00Z'), Date.parse('2026-10-08T21:00Z')));
 });

@@ -5,6 +5,7 @@ import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, m
 import { chances, matchPicks, model, secador, suggestScore } from './sim.js';
 import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
+import { coachFits, fetchCoaches } from './coach.js';
 import * as fx from './fx.js';
 import { HOUR, addDays, dayLabel, dm, doo, esc, fmtTime, o, sameDay, save, shortDay, store, ymd } from './util.js';
 
@@ -29,6 +30,10 @@ const SECADOR_RUNS = 4000;
 const SECADOR_KEY = 'secador';
 const RIVALS_KEY = 'rivais:v1';
 const ADVICE_KEY = 'secador-conselhos:v1';
+const COACH_KEY = 'tecnicos:v1';
+const COACH_MS = 12 * HOUR;          // técnico conhecido vale por meio dia
+const COACH_RETRY_MS = 10 * 60e3;   // sem resposta das fontes, tenta de novo depois disso
+const LINEUP_MS = 2 * 60e3;         // perto do jogo, sem escalação ainda: busca o resumo de novo
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -78,6 +83,8 @@ const state = {
   flashes: new Map(),
   alerts: [],
   summaries: new Map(),
+  coaches: store(COACH_KEY, {}), // id do time -> {c: técnico ou null, t}
+  coachTry: {},
   lastStandings: 0,
   lastOk: 0,
   lastCache: 0,
@@ -287,7 +294,10 @@ async function loadSummary(id, force = false) {
   if (!ev) return;
   const cached = state.summaries.get(id);
   if (cached?.loading) return;
-  if (cached && !force && (ev.status.kind !== 'live' || Date.now() - cached.t < SUMMARY_MS)) return;
+  // Ao vivo, o resumo é refeito a cada SUMMARY_MS; perto do início, até a escalação sair.
+  const waitLineup = ev.status.kind === 'pre' && ev.date - Date.now() < 2 * HOUR && !cached?.lineups;
+  const maxAge = ev.status.kind === 'live' ? SUMMARY_MS : waitLineup ? LINEUP_MS : Infinity;
+  if (cached && !force && Date.now() - cached.t < maxAge) return;
   state.summaries.set(id, { ...cached, loading: true });
   try {
     const json = await espn.fetchSummary(id);
@@ -295,7 +305,9 @@ async function loadSummary(id, force = false) {
     // Lance a lance, para o fluxo da partida (vem na mesma resposta das estatísticas).
     const plays = espn.parseSummaryPlays(json);
     const h2h = espn.parseHeadToHead(json, id);
-    state.summaries.set(id, { stats, plays, h2h, t: Date.now() });
+    // Escalações (e substituições), publicadas pela ESPN cerca de uma hora antes do jogo.
+    const lineups = espn.parseSummaryLineups(json);
+    state.summaries.set(id, { stats, plays, h2h, lineups, t: Date.now() });
     const played = ev.status.kind === 'live' || ev.status.kind === 'post';
     const ok = !played || Object.keys(stats).length > 0;
     state.diag.summary = { t: Date.now(), ok, error: ok ? null : 'sem estatísticas' };
@@ -304,6 +316,25 @@ async function loadSummary(id, force = false) {
     state.diag.summary = { t: Date.now(), ok: false, error: errText(err) };
   }
   if (state.sheet?.type === 'match' && state.sheet.id === id) safe('detalhe', renderSheet, el.sheetBody);
+}
+
+// Técnico dos dois times (a ESPN não traz; vem da Wikipédia e do Wikidata), guardado por meio dia.
+// O detalhe do jogo é redesenhado quando chega.
+async function loadCoaches(ev) {
+  const now = Date.now();
+  const ids = [ev.home.id, ev.away.id].filter((id) => {
+    const c = state.coaches[id];
+    return !(c && now - c.t < COACH_MS) && now - (state.coachTry[id] || 0) > COACH_RETRY_MS;
+  });
+  if (!ids.length) return;
+  for (const id of ids) state.coachTry[id] = now;
+  let got = {};
+  try { got = await fetchCoaches(ids); } catch { return; }
+  if (!Object.keys(got).length) return;
+  for (const [id, c] of Object.entries(got)) state.coaches[id] = { c, t: Date.now() };
+  save(COACH_KEY, state.coaches);
+  const open = state.sheet?.type === 'match' ? state.events.get(state.sheet.id) : null;
+  if (open && ids.some((id) => playsIn(open, id))) safe('detalhe', renderSheet, el.sheetBody);
 }
 
 function saveCache() {
@@ -353,7 +384,10 @@ async function tick({ warm = false } = {}) {
     el.refresh.classList.remove('loading');
     refresh();
     schedule();
-    if (state.sheet?.type === 'match' && state.events.get(state.sheet.id)?.status.kind === 'live') loadSummary(state.sheet.id, true);
+    // Detalhe aberto: ao vivo, o resumo é refeito; antes do jogo, até a escalação sair (loadSummary decide).
+    const open = state.sheet?.type === 'match' ? state.events.get(state.sheet.id) : null;
+    if (open?.status.kind === 'live') loadSummary(open.id, true);
+    else if (open?.status.kind === 'pre') loadSummary(open.id);
   }
 }
 
@@ -837,7 +871,11 @@ function openSheet(spec) {
     document.documentElement.classList.add('sheet-open');
   }
   el.sheet.querySelector('.sheet-scroll').scrollTop = 0;
-  if (spec.type === 'match') loadSummary(spec.id);
+  if (spec.type === 'match') {
+    loadSummary(spec.id);
+    const ev = state.events.get(spec.id);
+    if (ev) loadCoaches(ev);
+  }
 }
 
 function closeSheet() {
@@ -851,6 +889,11 @@ function sheetClosed() {
   state.sheetStack = [];
   document.body.append(el.toasts);
   document.documentElement.classList.remove('sheet-open');
+}
+
+function coachOf(ev, team) {
+  const c = state.coaches[team.id]?.c;
+  return coachFits(c, ev) ? c : null;
 }
 
 function renderSheet() {
@@ -882,6 +925,9 @@ function renderSheet() {
       flow,
       // Leitura do jogo: gols, lances que mudaram o jogo, quem manda e o momento.
       reading: matchReading(ev, { plays: sum?.plays || null, stats, flow }),
+      // Escalações e substituições (resumo da ESPN) e o técnico de cada time, quando vale para este jogo.
+      lineups: sum?.lineups || null,
+      coaches: { home: coachOf(ev, ev.home), away: coachOf(ev, ev.away) },
       picks: state.table && (ev.status.kind === 'pre' || ev.status.kind === 'live') ? matchPicks(currentModel(), ev) : null,
     });
   } else if (spec.type === 'team') {

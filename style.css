@@ -917,6 +917,39 @@ main {
 .card-ico { display: block; width: 10px; height: 14px; border-radius: 2px; }
 .card-ico.yellow { background: var(--gol); }
 .card-ico.red { background: var(--live); }
+/* Substituição: quem entra (seta verde para cima) e quem sai (seta vermelha para baixo) */
+.sub-ico path { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sub-ico .in { stroke: var(--good); }
+.sub-ico .out { stroke: var(--live); }
+.tl-sub .tl-txt { font-size: 13px; }
+.sub-out { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+
+/* Escalações: como na ficha técnica, uma linha do campo por vez (goleiro, defesa, meio, ataque) */
+.lineup + .lineup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.lu-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 15px; }
+.lu-head span { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.lu-line { font-size: 14px; line-height: 1.45; text-wrap: pretty; }
+.lu-line + .lu-line { margin-top: 4px; }
+.lu-p { white-space: nowrap; }
+.lu-sub { color: var(--muted); font-size: 13px; }
+.lu-sub > span { white-space: nowrap; }
+.lu-ic { display: inline-flex; align-items: center; gap: 1px; margin-left: 3px; vertical-align: -1px; }
+.lu-ic small { margin-left: 2px; font-size: 11px; color: var(--muted); }
+.lu-line .card-ico, .lu-sub .card-ico { display: inline-block; width: 8px; height: 11px; margin-left: 4px; vertical-align: -1px; }
+.lu-bench, .lu-coach, .lu-note { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.lu-note { margin-top: 0; }
+.lu-bench .in, .lu-coach b { color: var(--ink); }
+.lu-coach b { font-weight: 600; }
+.lu-coach small { font-size: 11px; }
+.lu-k {
+  margin-right: 6px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .tl-break {
   text-align: center;
   font-size: 11px;

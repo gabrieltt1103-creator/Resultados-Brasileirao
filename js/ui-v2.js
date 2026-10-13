@@ -3,7 +3,7 @@
 // o número mostra e o que só se consulta de vez em quando fica recolhido. O que não muda (detalhe do
 // time, escolha do time, status dos dados, texto para compartilhar) vem direto de ui.js.
 export * from './ui.js';
-import { crest, flowChart, formDots, miniTable, pct, readingList, scorers, secadorLine } from './ui.js';
+import { crest, flowChart, formDots, lineupsHtml, miniTable, pct, readingList, scorers, secadorLine, withSubs } from './ui.js';
 import { bucketLabels, goalTimeNote, h2hSummary, homeAwayNote, storyTags, tableLine } from './insights.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, weekdayShort } from './util.js';
 
@@ -365,14 +365,19 @@ function track(ev) {
   <div class="v2-ticks"><span style="left:0">0'</span><span style="left:${x(45)}">45'</span><span style="left:${x(90)}">90'</span></div>`;
 }
 
-function lances(ev) {
-  const items = ev.incidents.filter((i) => i.kind === 'goal' || i.kind === 'red');
+const SUB = '<svg class="sub-ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path class="in" d="M5 13V3M2 6l3-3 3 3"/><path class="out" d="M11 3v10M8 10l3 3 3-3"/></svg>';
+
+function lances(ev, lineups) {
+  const items = withSubs(ev, lineups).filter((i) => i.kind === 'goal' || i.kind === 'red' || i.kind === 'sub');
   const rows = items.map((i) => {
     const home = i.team === ev.home.id;
-    const extra = i.kind === 'red' ? ' <small>(vermelho)</small>' : `${i.pen ? ' <small>(pênalti)</small>' : ''}${i.og ? ' <small>(contra)</small>' : ''}`;
-    const ico = i.kind === 'red' ? '<i class="card-ico red"></i>' : `<i class="v2-ball ${home ? 'h' : 'a'}"></i>`;
-    const who = esc(i.who || (i.kind === 'goal' ? 'Gol' : i.staff ? 'Comissão técnica' : 'Cartão vermelho'));
-    return `<div class="v2-tl"><span class="l">${home ? `${who}${extra}${ico}` : ''}</span><span class="m">${esc(i.min.label)}</span><span class="r">${home ? '' : `${ico}${who}${extra}`}</span></div>`;
+    let extra = i.kind === 'red' ? ' <small>(vermelho)</small>' : i.kind === 'sub' ? `<small class="sub-out">sai ${esc(i.out)}</small>` : `${i.pen ? ' <small>(pênalti)</small>' : ''}${i.og ? ' <small>(contra)</small>' : ''}`;
+    const ico = i.kind === 'red' ? '<i class="card-ico red"></i>' : i.kind === 'sub' ? SUB : `<i class="v2-ball ${home ? 'h' : 'a'}"></i>`;
+    const name = esc(i.who || (i.kind === 'goal' ? 'Gol' : i.staff ? 'Comissão técnica' : 'Cartão vermelho'));
+    // Troca: quem entra em cima e quem sai embaixo, menor.
+    const who = i.kind === 'sub' ? `<span class="sub-txt">${name}${extra}</span>` : name;
+    if (i.kind === 'sub') extra = '';
+    return `<div class="v2-tl${i.kind === 'sub' ? ' sub' : ''}"><span class="l">${home ? `${who}${extra}${ico}` : ''}</span><span class="m">${esc(i.ht ? 'Int.' : i.min.label)}</span><span class="r">${home ? '' : `${ico}${who}${extra}`}</span></div>`;
   });
   const y = (t) => ev.incidents.filter((i) => i.kind === 'yellow' && !i.staff && i.team === t.id).length;
   const yh = y(ev.home);
@@ -430,7 +435,7 @@ function h2hBlock(ev, games) {
     ${rows}${sum.streak ? `<p class="v2-cap">${esc(sum.streak)}</p>` : ''}</section>`;
 }
 
-/** Detalhe de um jogo. ctx: {table, scen, stats, statsLoading, formById, favorite, story, roundLabel, picks, zones, inFocus, now, flow, reading} */
+/** Detalhe de um jogo. ctx: {table, scen, stats, statsLoading, formById, favorite, story, roundLabel, picks, zones, inFocus, now, flow, reading, lineups, coaches} */
 export function matchSheet(ev, ctx) {
   const s = ev.status;
   const pre = s.kind === 'pre' || s.kind === 'off';
@@ -447,6 +452,7 @@ export function matchSheet(ev, ctx) {
   // embaixo, a leitura do jogo (gols, lances que mudaram o jogo, quem manda e o momento).
   const reading = ctx.reading || [];
   const showHow = !pre && (ev.incidents.length || post || ctx.flow || reading.length);
+  const lineups = lineupsHtml(ev, ctx.lineups, ctx.coaches);
   const stats = ctx.stats ? statBars(ev, ctx.stats) : '';
   const lines = ctx.inFocus && ctx.table && !pre ? [tableLine(ev.home.id, ctx.table, ctx.zones), tableLine(ev.away.id, ctx.table, ctx.zones)].filter(Boolean) : [];
   const form = (t) => {
@@ -461,7 +467,8 @@ export function matchSheet(ev, ctx) {
     ${tags.length ? `<p class="v2-mtags">${tags.map((t) => `<b class="v2-chip">${esc(t)}</b>`).join('')}</p>` : ''}
     ${showHow ? `<section class="v2-block"><h3>${s.kind === 'live' ? 'Como está' : 'Como foi'}${ctx.flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>${ctx.flow ? flowChart(ctx.flow, ev, reading.join(' ')) : track(ev)}
       ${readingList(reading)}
-      ${lances(ev)}</section>` : ''}
+      ${lances(ev, ctx.lineups)}</section>` : ''}
+    ${lineups ? `<section class="v2-block"><h3>Escalações</h3>${lineups}</section>` : ''}
     ${oddsBlock(ev, ctx.picks)}
     ${stakesBlock(ev, ctx.scen)}
     ${s.kind !== 'post' ? `<button type="button" class="v2-btn dark wide" data-action="simulate" data-id="${esc(ev.id)}">Simular este jogo e ver a tabela</button>` : ''}

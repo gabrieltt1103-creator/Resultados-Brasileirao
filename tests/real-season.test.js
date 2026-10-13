@@ -262,12 +262,18 @@ test('escalações: titulares por linha da formação, trocas, reservas e técni
   const ev = { id: '401841260', date: new Date('2026-10-13T00:00Z'), status: { kind: 'live', label: "80'" }, incidents: [],
     home: { id: '6079', name: 'Bragantino' }, away: { id: '2022', name: 'Cruzeiro' } };
   const html = lineupsHtml(ev, l, { home: null, away: { name: 'Artur Jorge', src: 'Wikipédia' } });
-  const text = html.replace(/<[^>]+>/g, '').replace(/&#39;/g, "'");
-  assert.match(text, /William \(Fabrício Bruno, no intervalo\), João Marcelo \(Wesley Ribeiro, 63'\), Jonathan Jesus, Gabriel Rojas \(Matías Viña, no intervalo\)/);
-  assert.match(html, /William<i class="card-ico yellow"/);
-  assert.match(html, /Kaio Jorge<span class="lu-ic" title="Gol contra">/);
-  assert.match(html, /Técnico<\/span><b>Artur Jorge<\/b> <small>Wikipédia<\/small>/);
-  assert.equal((html.match(/class="lu-coach"/g) || []).length, 1);
+  // Listas verticais lado a lado: número, nome (o curto quando é longo) e, à direita, gol, cartão e troca.
+  const rows = (html.match(/<li[^>]*>.*?<\/li>/g) || []).map((li) => li.replace(/<[^>]+>/g, '').replace(/&#39;/g, "'"));
+  assert.equal(rows.length, 11 + 11 + 12 + 12);
+  assert.deepEqual(rows.slice(0, 3), ['18Tiago Volpi', '52Ryan Augusto', "16G. Marques58'"]); // sem nome curto da ESPN: "G. Marques"
+  assert.ok(rows.includes('12WilliamInt.'));
+  assert.match(html, /<span class="nm" title="William">William<\/span><span class="ev"><i class="card-ico yellow"[^>]*><\/i><span class="lu-swap" title="Saiu para a entrada de Fabrício Bruno">/);
+  assert.match(html, /title="Kaio Jorge">Kaio Jorge<\/span><span class="ev"><span class="lu-ic og" title="Gol contra">/);
+  // Reservas: primeiro quem entrou, na ordem das trocas; os outros apagados, pelo número.
+  assert.deepEqual(rows.slice(22, 25), ["3E. Santos58'", "35M. Fernandes65'", "6Gabriel66'"]);
+  assert.match(html, /<li class="idle"><span class="n">1<\/span><span class="nm" title="Cleiton">Cleiton/);
+  assert.match(html, /<p class="lu-k">Técnicos<\/p><div class="lu-cols"><p class="lu-coach"><\/p><p class="lu-coach">Artur Jorge<\/p><\/div>/);
+  assert.match(html, /Técnicos: Wikipédia\./);
   // Lance a lance: as trocas entram junto com os gols e cartões, as do intervalo depois do 1º tempo.
   const list = withSubs({ ...ev, incidents: [{ kind: 'goal', team: '2022', who: 'Zé Lucas', min: { base: 43, extra: 0, label: "43'", sort: 43 } },
     { kind: 'yellow', team: '6079', who: 'Ryan Augusto', min: { base: 47, extra: 0, label: "47'", sort: 47 } }] }, l);
@@ -275,6 +281,6 @@ test('escalações: titulares por linha da formação, trocas, reservas e técni
   // Sem escalação: antes do jogo, avisa quando sai e mostra os técnicos.
   const pre = lineupsHtml({ ...ev, status: { kind: 'pre' } }, null, { home: { name: 'Vagner Mancini', src: 'Wikipédia' }, away: { name: 'Artur Jorge', src: 'Wikipédia' } });
   assert.match(pre, /As escalações saem cerca de uma hora antes do jogo/);
-  assert.match(pre, /Técnicos<\/span><b>Vagner Mancini<\/b> \(Bragantino\) e <b>Artur Jorge<\/b> \(Cruzeiro\)/);
+  assert.match(pre, /<p class="lu-coach">Vagner Mancini<\/p><p class="lu-coach">Artur Jorge<\/p>/);
   assert.equal(lineupsHtml({ ...ev, status: { kind: 'post' } }, null, null), '');
 });

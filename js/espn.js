@@ -276,6 +276,8 @@ const DEPTH = {
   AM: 4, 'AM-R': 4, 'AM-L': 4, RW: 4.5, LW: 4.5, SS: 4.8, 'CF-R': 5, 'CF-L': 5, RCF: 5, LCF: 5, RF: 5, LF: 5, F: 5.2, CF: 5.2, ST: 5.2,
 };
 const lateral = (pos) => (/^(RB|RWB|RM|RW|RF)$/.test(pos) ? 0 : /-R$|^RCF$/.test(pos) ? 1 : /-L$|^LCF$/.test(pos) ? 3 : /^(LB|LWB|LM|LW|LF)$/.test(pos) ? 4 : 2);
+// Nome curto para listas estreitas: o da ESPN, se for mesmo mais curto; senão, inicial e sobrenome ("G. Marques").
+const shortOf = (a) => (a?.shortName && a.shortName.length < (a.displayName || '').length ? a.shortName : shortName(a?.displayName || ''));
 const playerName = (a) => (a?.displayName && a.displayName.length <= 16 ? a.displayName : a?.shortName || a?.displayName) || '';
 
 // Titulares em linhas, pela formação ("4-2-3-1": goleiro, 4, 2, 3, 1). Sem formação que feche, pela posição.
@@ -301,13 +303,14 @@ function linesOf(starters, formation) {
 /**
  * Escalações do resumo do jogo, que a ESPN publica perto do início (antes disso, devolve null):
  * {home, away, subs}. Cada time: {formation, lines: [[jogador]], bench: [jogador]}; jogador:
- * {name, n, pos, place, goals, og, yellow, red, in, out}, com in/out = {min, ht, other} (quem saiu ou entrou).
+ * {name, short, n, pos, place, goals, og, yellow, red, in, out}, com in/out = {min, ht, other} (quem saiu ou entrou).
  * subs: as trocas, em ordem, para o lance a lance: [{side, min, ht, in, out}]. ht: troca no intervalo.
  */
 export function parseSummaryLineups(json) {
-  // Trocas de "45'" feitas já no 2º tempo (o lance a lance diz o tempo): são do intervalo.
-  const htSubs = new Set((json?.commentary || []).filter((c) => c.play?.type?.type === 'substitution' && c.play?.period?.number === 2
-    && /^45'$/.test(c.time?.displayValue || '')).map((c) => c.text || ''));
+  // Troca de "45'" é do intervalo, a não ser que o lance a lance mostre uma troca desse time aos 45' ainda no
+  // 1º tempo (os nomes no lance a lance nem sempre são os da escalação: "Doma" e "Eduardo Doma").
+  const subsAt45 = (team, period) => (json?.commentary || []).filter((c) => c.play?.type?.type === 'substitution'
+    && c.play?.team?.displayName === team && c.play?.period?.number === period && /^45'$/.test(c.time?.displayValue || ''));
   const out = { subs: [] };
   // Nome de cada jogador como na escalação, para quem entrou e saiu aparecer igual nos dois lugares.
   const names = new Map();
@@ -317,15 +320,18 @@ export function parseSummaryLineups(json) {
     const side = r.homeAway === 'home' || r.homeAway === 'away' ? r.homeAway : null;
     const roster = Array.isArray(r.roster) ? r.roster : [];
     if (!side || !roster.some((p) => p.starter)) continue;
+    const firstHalf45 = subsAt45(r.team?.displayName, 1);
+    const secondHalf45 = subsAt45(r.team?.displayName, 2);
     const players = roster.map((p) => {
       const plays = Array.isArray(p.plays) ? p.plays : [];
       const swaps = plays.filter((x) => x.substitution).map((x) => parseMinute(x.clock?.displayValue));
       const name = playerName(p.athlete);
-      const ht = (m, who) => m?.base === 45 && !m.extra && [...htSubs].some((t) => t.includes(who));
+      const ht = (m, who) => m?.base === 45 && !m.extra
+        && (!firstHalf45.length || !firstHalf45.some((c) => (c.text || '').includes(who)) || secondHalf45.some((c) => (c.text || '').includes(who)));
       const inMin = p.subbedIn ? swaps[0] : null;
       const outMin = p.subbedOut ? swaps[swaps.length - 1] : null;
       return {
-        name, n: String(p.jersey ?? ''), pos: p.position?.abbreviation || '', place: Number(p.formationPlace) || 0, starter: !!p.starter,
+        name, short: shortOf(p.athlete) || name, n: String(p.jersey ?? ''), pos: p.position?.abbreviation || '', place: Number(p.formationPlace) || 0, starter: !!p.starter,
         goals: plays.filter((x) => x.didScore && !x.ownGoal).length,
         og: plays.filter((x) => x.didScore && x.ownGoal).length,
         yellow: plays.some((x) => x.yellowCard), red: plays.some((x) => x.redCard),

@@ -412,9 +412,11 @@ main { padding-top: 10px; }
 .v2-tl.sub .sub-ico { margin: 0; flex: none; }
 .v2-tl .sub-txt { min-width: 0; line-height: 1.25; padding: 4px 0; }
 .v2-tl .sub-out { font-size: 12px; }
-.lu-head { font: 700 15px/1.2 var(--body); }
-.lu-line { font: 500 14px/1.45 var(--body); }
+.lu-team b { font: 700 15px/1.2 var(--body); }
+.lu-list li { font: 500 14px/1.2 var(--body); }
+@media (max-width: 380px) { .lu-list li { font-size: 13px; letter-spacing: -0.01em; } }
 .lu-k { font: 700 10.5px/1.3 var(--body); font-stretch: 105%; letter-spacing: 0.05em; }
+.lu-coach { font: 600 14px/1.3 var(--body); }
 .v2-ball { display: inline-block; width: 10px; height: 10px; margin: 0 6px; border-radius: 50%; vertical-align: 0; }
 .v2-ball.h { background: var(--ink); }
 .v2-ball.a { box-shadow: inset 0 0 0 2.5px var(--away); }

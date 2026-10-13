@@ -367,6 +367,7 @@ function track(ev) {
 
 const SUB = '<svg class="sub-ico" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path class="in" d="M5 13V3M2 6l3-3 3 3"/><path class="out" d="M11 3v10M8 10l3 3 3-3"/></svg>';
 
+// Gols, expulsões e trocas, do mais recente para o mais antigo.
 function lances(ev, lineups) {
   const items = withSubs(ev, lineups).filter((i) => i.kind === 'goal' || i.kind === 'red' || i.kind === 'sub');
   const rows = items.map((i) => {
@@ -383,7 +384,7 @@ function lances(ev, lineups) {
   const yh = y(ev.home);
   const ya = y(ev.away);
   const cards = yh + ya ? `<p class="v2-cap muted">Cartões amarelos: ${yh} para ${o(ev.home.name)}, ${ya} para ${o(ev.away.name)}.</p>` : '';
-  return rows.join('') + cards;
+  return rows.reverse().join('') + cards;
 }
 
 function oddsBlock(ev, mp) {

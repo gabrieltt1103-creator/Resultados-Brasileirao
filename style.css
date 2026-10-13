@@ -924,30 +924,41 @@ main {
 .tl-sub .tl-txt { font-size: 13px; }
 .sub-out { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
 
-/* Escalações: como na ficha técnica, uma linha do campo por vez (goleiro, defesa, meio, ataque) */
-.lineup + .lineup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
-.lu-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 15px; }
-.lu-head span { margin-left: auto; color: var(--muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.lu-line { font-size: 14px; line-height: 1.45; text-wrap: pretty; }
-.lu-line + .lu-line { margin-top: 4px; }
-.lu-p { white-space: nowrap; }
-.lu-sub { color: var(--muted); font-size: 13px; }
-.lu-sub > span { white-space: nowrap; }
-.lu-ic { display: inline-flex; align-items: center; gap: 1px; margin-left: 3px; vertical-align: -1px; }
-.lu-ic small { margin-left: 2px; font-size: 11px; color: var(--muted); }
-.lu-line .card-ico, .lu-sub .card-ico { display: inline-block; width: 8px; height: 11px; margin-left: 4px; vertical-align: -1px; }
-.lu-bench, .lu-coach, .lu-note { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
-.lu-note { margin-top: 0; }
-.lu-bench .in, .lu-coach b { color: var(--ink); }
-.lu-coach b { font-weight: 600; }
-.lu-coach small { font-size: 11px; }
+/* Escalações: os dois times lado a lado, em listas verticais (número, nome e, à direita, gols, cartão e troca) */
+.lu-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 16px; }
+.lu-team { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lu-team > span { display: grid; min-width: 0; line-height: 1.2; }
+.lu-team b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lu-team small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .lu-k {
-  margin-right: 6px;
+  margin: 14px 0 4px;
   font-family: var(--display);
   font-weight: 700;
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--muted);
+}
+.lu-list { list-style: none; margin: 0; padding: 0; }
+.lu-list li { display: flex; align-items: center; gap: 6px; min-height: 26px; font-size: 14px; }
+.lu-list .n { flex: none; width: 18px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lu-list .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lu-list .ev { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: auto; }
+.lu-list li.idle .nm { color: var(--muted); }
+.lu-ic { display: inline-flex; gap: 1px; }
+.lu-ic.og svg circle { stroke: var(--live); }
+.lu-list .card-ico { width: 8px; height: 11px; }
+.lu-swap { display: inline-flex; align-items: center; gap: 1px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.lu-arrow path { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.lu-arrow.in path { stroke: var(--good); }
+.lu-arrow.out path { stroke: var(--live); }
+.lu-coach { margin: 0; font-size: 14px; font-weight: 600; }
+.lu-note, .lu-src { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+.lu-src { font-size: 11px; }
+@media (max-width: 380px) {
+  .lu-cols { column-gap: 10px; }
+  .lu-list li { gap: 4px; font-size: 13px; }
+  .lu-list .n { width: 15px; font-size: 11px; }
 }
 
 .tl-break {

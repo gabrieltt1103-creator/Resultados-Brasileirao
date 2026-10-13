@@ -430,6 +430,7 @@ export function withSubs(ev, lineups) {
   return [...ev.incidents, ...subs].sort((a, b) => key(a) - key(b));
 }
 
+// Lance a lance: o mais recente em cima, com o intervalo entre os dois tempos.
 function timeline(ev, lineups) {
   const list = withSubs(ev, lineups);
   if (!list.length) return '';
@@ -443,50 +444,56 @@ function timeline(ev, lineups) {
       : i.kind === 'sub' ? `<small class="sub-out">sai ${esc(i.out)}</small>` : '';
     items.push(`<li class="tl tl-${side} tl-${i.kind}"><span class="tl-min">${esc(i.ht ? 'Int.' : i.min.label)}</span><span class="tl-ico">${ICON[i.kind]}</span><span class="tl-txt">${name}${extra}</span></li>`);
   }
-  return `<ol class="timeline">${items.join('')}</ol>`;
+  // Mais recente em cima.
+  return `<ol class="timeline" reversed>${items.reverse().join('')}</ol>`;
 }
 
 // ---------- escalações ----------
 
 const BALL = ICON.goal.replace('width="16" height="16"', 'width="13" height="13"');
-// Gols e cartão de cada jogador, logo depois do nome.
-const luMarks = (p) => `${p.goals ? `<span class="lu-ic" title="${p.goals > 1 ? `${p.goals} gols` : 'Gol'}">${BALL.repeat(p.goals)}</span>` : ''}${p.og ? `<span class="lu-ic" title="Gol contra">${BALL}<small>contra</small></span>` : ''}${p.red ? '<i class="card-ico red" title="Vermelho"></i>' : p.yellow ? '<i class="card-ico yellow" title="Amarelo"></i>' : ''}`;
+const ARROW = {
+  in: '<svg class="lu-arrow in" viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M5 9V1.5M1.8 4.5L5 1.3l3.2 3.2"/></svg>',
+  out: '<svg class="lu-arrow out" viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><path d="M5 1v7.5M1.8 5.5L5 8.7l3.2-3.2"/></svg>',
+};
+// Nome que cabe na coluna: o curto da ESPN ("G. Rodríguez") quando o nome é longo.
+const fitName = (p) => (p.name.length <= 12 ? p.name : p.short || p.name);
+const minOf = (s) => (s.ht ? 'Int.' : s.min.label);
 
-function teamLineup(team, t, coach) {
-  const bench = new Map(t.bench.map((p) => [p.name, p]));
-  // Titular e quem entrou no lugar dele (e no lugar de quem entrou), como na ficha: "Vitinho (Mateo Ponte, 80')".
-  const player = (p) => {
-    const parts = [];
-    let cur = p;
-    for (let guard = 0; cur.out && guard < 4; guard++) {
-      const sub = bench.get(cur.out.other);
-      parts.push(`<span>${esc(cur.out.other || '?')}${sub ? luMarks(sub) : ''}, ${cur.out.ht ? 'no intervalo' : esc(cur.out.min.label)}</span>`);
-      if (!sub) break;
-      cur = sub;
-    }
-    return `<span class="lu-p">${esc(p.name)}${luMarks(p)}</span>${parts.length ? ` <span class="lu-sub">(${parts.join('; ')})</span>` : ''}`;
-  };
-  return `<div class="lineup">
-    <div class="lu-head">${crest(team.logo, team.name, 20, 'mini')}<b>${esc(team.name)}</b>${t.formation ? `<span>${esc(t.formation)}</span>` : ''}</div>
-    ${t.lines.map((line) => `<div class="lu-line">${line.map(player).join(', ')}</div>`).join('')}
-    ${t.bench.length ? `<p class="lu-bench"><span class="lu-k">Reservas</span>${t.bench.map((p) => `<span${p.in ? ' class="in"' : ''}>${esc(p.name)}</span>`).join(', ')}</p>` : ''}
-    ${coach ? `<p class="lu-coach"><span class="lu-k">Técnico</span><b>${esc(coach.name)}</b> <small>${esc(coach.src)}</small></p>` : ''}
-  </div>`;
+// Uma linha da lista: número, nome e, à direita, gols, cartão e a troca (seta e minuto).
+function luRow(p, bench = false) {
+  const goals = p.goals ? `<span class="lu-ic" title="${p.goals > 1 ? `${p.goals} gols` : 'Gol'}">${BALL.repeat(p.goals)}</span>` : '';
+  const og = p.og ? `<span class="lu-ic og" title="Gol contra">${BALL}</span>` : '';
+  const card = p.red ? '<i class="card-ico red" title="Vermelho"></i>' : p.yellow ? '<i class="card-ico yellow" title="Amarelo"></i>' : '';
+  const sub = p.out ? `<span class="lu-swap" title="${esc(`Saiu para a entrada de ${p.out.other}`)}">${ARROW.out}${esc(minOf(p.out))}</span>`
+    : p.in ? `<span class="lu-swap" title="${esc(`Entrou no lugar de ${p.in.other}`)}">${ARROW.in}${esc(minOf(p.in))}</span>` : '';
+  const ev = goals + og + card + sub;
+  return `<li${bench && !p.in ? ' class="idle"' : ''}><span class="n">${esc(p.n)}</span><span class="nm" title="${esc(p.name)}">${esc(fitName(p))}</span>${ev ? `<span class="ev">${ev}</span>` : ''}</li>`;
 }
 
+// Reservas: primeiro quem entrou, na ordem das trocas; depois os outros, pelo número.
+const benchOrder = (bench) => [...bench].sort((a, b) => (a.in ? 0 : 1) - (b.in ? 0 : 1)
+  || (a.in && b.in ? (a.in.ht ? 45.995 : a.in.min.sort) - (b.in.ht ? 45.995 : b.in.min.sort) : (Number(a.n) || 99) - (Number(b.n) || 99)));
+
 /**
- * Escalações dos dois times como na ficha técnica: titulares por linha do campo (goleiro, defesa, meio, ataque),
- * quem entrou no lugar de cada um entre parênteses, reservas e técnico. Antes do anúncio, avisa quando sai
- * e mostra os técnicos. lineups: parseSummaryLineups; coaches: {home, away} ({name, src} ou null).
+ * Escalações dos dois times, lado a lado, como nas fichas clássicas: titulares em lista vertical (goleiro,
+ * defesa, meio e ataque, pela formação), reservas e técnico, com gols, cartões e trocas (seta e minuto).
+ * Antes do anúncio, avisa quando sai e mostra os técnicos. lineups: parseSummaryLineups; coaches: {home, away}.
  */
 export function lineupsHtml(ev, lineups, coaches) {
-  if (lineups) return teamLineup(ev.home, lineups.home, coaches?.home) + teamLineup(ev.away, lineups.away, coaches?.away);
   const pre = ev.status.kind === 'pre' || ev.status.kind === 'off';
   const known = ['home', 'away'].filter((side) => coaches?.[side]);
-  if (!pre && !known.length) return '';
+  if (!lineups && !pre && !known.length) return '';
+  const cols = (fn) => `<div class="lu-cols">${['home', 'away'].map(fn).join('')}</div>`;
+  const head = cols((side) => `<div class="lu-team">${crest(ev[side].logo, ev[side].name, 22, 'mini')}<span><b>${esc(ev[side].name)}</b>${lineups?.[side]?.formation ? `<small>${esc(lineups[side].formation)}</small>` : ''}</span></div>`);
+  const coachRow = known.length ? `<p class="lu-k">Técnicos</p>${cols((side) => `<p class="lu-coach">${coaches?.[side] ? esc(coaches[side].name) : ''}</p>`)}` : '';
   const srcs = [...new Set(known.map((side) => coaches[side].src))];
-  return `${pre ? '<p class="lu-note">As escalações saem cerca de uma hora antes do jogo.</p>' : ''}
-    ${known.length ? `<p class="lu-coach"><span class="lu-k">${known.length > 1 ? 'Técnicos' : 'Técnico'}</span>${known.map((side) => `<b>${esc(coaches[side].name)}</b> (${esc(ev[side].name)})`).join(' e ')} <small>${esc(srcs.join(' e '))}</small></p>` : ''}`;
+  const note = srcs.length ? `<p class="lu-src">Técnicos: ${esc(srcs.join(' e '))}. A ESPN não informa o técnico.</p>` : '';
+  if (!lineups) return `${head}${pre ? '<p class="lu-note">As escalações saem cerca de uma hora antes do jogo.</p>' : ''}${coachRow}${note}`;
+  const list = (players, bench) => `<ol class="lu-list">${players.map((p) => luRow(p, bench)).join('')}</ol>`;
+  return `${head}
+    <p class="lu-k">Titulares</p>${cols((side) => list(lineups[side].lines.flat(), false))}
+    ${lineups.home.bench.length || lineups.away.bench.length ? `<p class="lu-k">Reservas</p>${cols((side) => list(benchOrder(lineups[side].bench), true))}` : ''}
+    ${coachRow}${note}`;
 }
 
 function lineupsBlock(ev, lineups, coaches) {

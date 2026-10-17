@@ -611,7 +611,9 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   }
 
   // Um parágrafo por tempo: quem foi melhor e o que aconteceu, na ordem.
-  const p1 = flow ? phase(flow, 0, flow.now != null && flow.now < flow.half ? flow.now : flow.half) : null;
+  // Ao vivo, quem é melhor só depois de uns 12 minutos de jogo: antes disso, é começo de jogo.
+  const early1 = live && !ev.status.half && flow?.now != null && flow.now < Math.min(12, flow.half);
+  const p1 = flow && !early1 ? phase(flow, 0, flow.now != null && flow.now < flow.half ? flow.now : flow.half) : null;
   const p2 = flow && (flow.now == null || flow.now > flow.half) ? phase(flow, flow.half, flow.now ?? flow.slots) : null;
   const inSecond = live && !ev.status.half && flow?.now != null && flow.now > flow.half;
   const dominatedBoth = (p1 === 'home' || p1 === 'away') && p1 === p2 && !live;
@@ -682,7 +684,9 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
       if (better && lead === better) {
         const { d, zero } = diffEnd(better);
         const need = d > 0 ? 'ampliar' : d === 0 ? (zero ? 'marcar' : 'desempatar') : d === -1 ? 'empatar' : 'diminuir';
-        if (!(current && d > 0)) opener += `, mas ${current ? 'ainda não conseguiu' : 'não conseguiu'} ${need}`;
+        // "Ainda não conseguiu marcar" só com o tempo já andando (20 minutos no tempo).
+        const played = flow?.now != null ? (half === 1 ? flow.now : flow.now - flow.half) : 45;
+        if (!(current && (d > 0 || played < 20))) opener += `, mas ${current ? 'ainda não conseguiu' : 'não conseguiu'} ${need}`;
       } else if (p === 'even' && !lead) opener += current ? (hs || as ? '' : ', ainda sem gols') : ' e sem gols';
       else if (lead) opener += current ? ', e o placar ainda não mudou' : ', e o placar não mudou';
     }
@@ -776,13 +780,22 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   }
   if (!paragraphs.length && !hs && !as) {
     const early = live && !ev.status.half && (liveClock(ev)?.base ?? 0) < 15;
-    if (live && dom.side) paragraphs.push(`${Name(dom.side)} tem mais o jogo, mas ainda não conseguiu marcar.`);
-    else paragraphs.push(!live ? 'Ficou no 0 a 0.' : early ? 'Começo de jogo, ainda sem chances claras.' : 'Ainda sem gols.');
+    // No começo, quem chega mais (pelos chutes do lance a lance), sem cobrar gol de ninguém.
+    const shots = { home: 0, away: 0 };
+    for (const p of plays || []) if (p.side && /^(shot-|goal|penalty---)/.test(p.type)) shots[p.side]++;
+    const keen = shots.home > shots.away ? 'home' : shots.away > shots.home ? 'away' : null;
+    if (live && dom.side && !early) paragraphs.push(`${Name(dom.side)} tem mais o jogo, mas ainda não conseguiu marcar.`);
+    else if (!live) paragraphs.push('Ficou no 0 a 0.');
+    else if (!early) paragraphs.push('Ainda sem gols.');
+    else if (keen) paragraphs.push(`Começo de jogo, com ${name(keen)} chegando mais.`);
+    else paragraphs.push(shots.home + shots.away ? 'Começo de jogo estudado, com poucas chegadas.' : 'Começo de jogo, ainda sem chances claras.');
   }
 
   // Fecho: ao vivo, como está agora; encerrado, o veredito.
   const ctx = { name, Name, other, last, reds, cur };
   let close = live ? nowLine(ev, flow, plays, ctx) : verdict(ev, dom, events, ctx);
+  // Começo do 2º tempo, ainda sem o que contar dele.
+  if (live && inSecond && !close && flow.now - flow.half < 10 && !events.some((e) => e.half === 2)) close = 'O segundo tempo acabou de começar.';
   // Ao vivo, quem vence finalizando bem menos: o placar não conta o jogo todo.
   const ahead = hs > as ? 'home' : as > hs ? 'away' : null;
   if (live && ahead && dom.side === other(ahead) && dom.strong && !paragraphs.some((x) => x.includes('mais volume'))) {
@@ -807,13 +820,21 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
 function nowLine(ev, flow, plays, { name, Name, other, last, reds, cur }) {
   if (!flow?.list || flow.now == null || ev.status.half) return '';
   const end = flow.now;
-  const start = Math.max(end > flow.half ? flow.half : 0, end - 10);
-  if (end - start < 5) return '';
+  const from = end > flow.half ? flow.half : 0;
+  // "Os últimos minutos" só fazem sentido com o tempo andando: 15 minutos no 1º tempo, 10 no 2º.
+  if (end - from < (from ? 10 : 15)) return '';
+  const start = Math.max(from, end - 10);
   let h = 0;
   let a = 0;
-  for (const p of flow.list) if (p.i >= start && p.i < end) { if (p.side === 'home') h += p.w; else a += p.w; }
+  let before = 0;
+  for (const p of flow.list) {
+    if (p.i >= start && p.i < end) { if (p.side === 'home') h += p.w; else a += p.w; } else if (p.i < start) before += p.w;
+  }
   if (h + a < 1.2) {
     if (cur.phase === 'quiet') return '';
+    // Esfriou só se antes estava mais quente; senão, segue morno.
+    const hotter = start > 0 && before / start >= 2.5 * ((h + a) / (end - start)) && before / start >= 0.2;
+    if (!hotter) return 'O jogo segue morno, com poucas chegadas.';
     const subs = (plays || []).filter((p) => p.type === 'substitution' && flow.slotOf(p) >= start && flow.slotOf(p) < end).length;
     return subs >= 2 ? 'Agora o jogo esfriou, com as substituições: quase nada acontece.' : 'Nos últimos minutos, o jogo esfriou: quase nada acontece.';
   }

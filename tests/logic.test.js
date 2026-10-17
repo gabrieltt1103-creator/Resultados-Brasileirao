@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseEvent, parseStandings, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
 import { buildRounds, pickDefault } from '../js/rounds.js';
 import { computeTable, distances, finishedTable, formOf, reconcile, scenarios, zonesFor } from '../js/table.js';
-import { goalTimeNote, headlines, homeAwayNote, impactLines, lastGoal, matchReading, matchStory, roundStats, scoreChange, tableLine, trends } from '../js/insights.js';
+import { goalTimeNote, headlines, homeAwayNote, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, tableLine, trends } from '../js/insights.js';
 import { deltaMonths, vanished } from '../js/season.js';
 import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, verdict, verdictText } from '../js/secador.js';
 import { statsView, tableCheck } from '../js/ui.js';
@@ -607,4 +607,21 @@ test('técnico: Wikipédia e Wikidata, com troca recente valendo mais', () => {
   assert.ok(coachFits(coach, game('post', '2026-10-12T19:00Z'), now));
   assert.ok(!coachFits(coach, game('post', '2026-10-11T19:00Z'), now + 2 * 864e5));
   assert.ok(!coachFits(coach, game('post', '2026-10-08T19:00Z'), Date.parse('2026-10-08T21:00Z')));
+});
+
+test('leitura ao vivo nos primeiros minutos: começo de jogo, sem "esfriou"', () => {
+  const t = (id, name) => ({ id, name, score: 0 });
+  const game = (label) => ({ id: 'x', status: { kind: 'live', label }, home: t('h', 'Atlético-MG'), away: t('a', 'Coritiba'), goalsComplete: true, incidents: [] });
+  const play = (type, side, base, x = null) => ({ type, side, period: base > 45 ? 2 : 1, base, extra: 0, x });
+  // Atlético-MG x Coritiba aos 6' (17/10/2026): um impedimento e faltas no meio de campo.
+  const plays = [play('offside', 'home', 2), play('foul', 'away', 3, 60), play('foul', 'home', 4, 55)];
+  const ev = game("6'");
+  assert.deepEqual(matchReading(ev, { plays, flow: matchFlow(plays, liveClock(ev)) }), ['Começo de jogo, ainda sem chances claras.']);
+  // Com chutes de um lado só, quem chega mais; com chutes dos dois, começo estudado.
+  const shots = [...plays, play('shot-off-target', 'home', 5), play('shot-blocked', 'home', 6)];
+  assert.deepEqual(matchReading(ev, { plays: shots, flow: matchFlow(shots, liveClock(ev)) }), ['Começo de jogo, com o Atlético-MG chegando mais.']);
+  // Segundo tempo recém-começado, sem lances dele ainda.
+  const late = [...shots, play('shot-on-target', 'away', 30), play('shot-off-target', 'home', 35), play('shot-on-target', 'home', 40)];
+  const ht = game("47'");
+  assert.equal(matchReading(ht, { plays: late, flow: matchFlow(late, liveClock(ht)) }).at(-1), 'O segundo tempo acabou de começar.');
 });

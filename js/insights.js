@@ -395,7 +395,8 @@ export function matchFlow(plays, now = null) {
   }
   if (now?.period === 1 && now.base >= 45 && now.extra < 99) stop1 = Math.max(stop1, now.extra);
   if (now?.period === 2 && now.base >= 90) stop2 = Math.max(stop2, now.extra);
-  if (used.length < 6) return null;
+  // Encerrado, com poucos lances, não há o que desenhar; ao vivo, o gráfico aparece desde o primeiro lance de ataque.
+  if (used.length < (now ? 1 : 6)) return null;
   const half = 45 + stop1;
   const slots = half + 45 + stop2;
   const slotOf = (p) => {
@@ -445,33 +446,65 @@ const CAME = { 'abriu o placar': 'o gol', empatou: 'o empate', virou: 'a virada'
 // Variação de palavras, sempre a mesma para o mesmo jogo (não muda a cada atualização).
 const vary = (id, words) => words[[...String(id ?? '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % words.length];
 
-// Autor do gol no fim da frase: ", com Pedro", ", de novo com Pedro", ", num gol contra de Marçal", ", de pênalti, com Hulk".
+const HOW = { header: ', de cabeça', 'free-kick': ', de falta', volley: ', de voleio', outside: ', de fora da área' };
+const ASSIST_WITH = { cross: 'cruzamento', 'through ball': 'lançamento', 'headed pass': 'escorada' };
+
+// Como saiu o gol, como contaria um torcedor: o jeito (de cabeça, de fora da área, num contra-ataque, na bola
+// parada) antes do autor; depois dele, só o passe que conta uma jogada (cruzamento, lançamento, escorada,
+// escanteio). Passe comum fica de fora, para o texto não virar lista de nomes.
+function goalWay(g) {
+  if (g.og) return { pre: '', post: '' };
+  const kind = ASSIST_WITH[g.assist?.with] || '';
+  let pre = `${g.pen ? ', de pênalti' : ''}${g.context === 'fast break' ? ', num contra-ataque' : ''}`;
+  let post = '';
+  if (!g.pen && g.context === 'corner') {
+    if (g.assist?.name && g.assist.with !== 'headed pass') post = `, após escanteio cobrado por ${g.assist.name}`;
+    else if (g.assist?.name) post = `, após escorada de ${g.assist.name} em escanteio`;
+    else pre += ', após escanteio';
+  } else if (!g.pen && g.context === 'set piece situation') {
+    if (kind) post = `, após ${kind} de ${g.assist.name} na bola parada`;
+    else pre += ', na bola parada';
+  } else if (!g.pen && kind) post = `, após ${kind} de ${g.assist.name}`;
+  return { pre: pre + (HOW[g.how] || ''), post };
+}
+
+// Autor do gol no fim da frase: ", com Pedro", ", de novo com Pedro", ", num gol contra de Marçal", ", de pênalti, com Hulk",
+// com o jeito do gol e o passe quando o lance a lance conta. Nome inteiro, se não for comprido demais.
 function scorerOf(e) {
   const g = e.g;
-  if (g.og) return g.who ? `, num gol contra de ${g.who}` : ', num gol contra';
-  const pen = g.pen ? ', de pênalti' : '';
-  if (!g.who) return pen;
-  if (e.again) return `${pen}, com o próprio ${g.who}`;
-  if (e.nth === 2) return `${pen}, de novo com ${g.who}`;
-  if (e.nth === 3) return `${pen}, com ${g.who} completando o hat-trick`;
-  if (e.nth > 3) return `${pen}, com ${g.who}, que fez ${NUM[e.nth] || e.nth} no jogo`;
-  return `${pen}, com ${g.who}`;
+  const who = g.full && g.full.length <= 18 ? g.full : g.who || g.full;
+  if (g.og) return who ? `, num gol contra de ${who}` : ', num gol contra';
+  const { pre, post } = goalWay(g);
+  if (!who) return pre + post;
+  let by = `, com ${who}`;
+  if (e.again) by = `, com o próprio ${who}`;
+  else if (e.nth === 2) by = `, de novo com ${who}`;
+  else if (e.nth === 3) by = `, com ${who} completando o hat-trick`;
+  else if (e.nth > 3) by = `, com ${who}, que fez ${NUM[e.nth] || e.nth} no jogo`;
+  return pre + by + post;
 }
 
 // Gols do jogo: do placar da ESPN ou, se ele ainda não trouxe os autores, do lance a lance.
 function goalsOf(ev, plays) {
   const h = ev.home.score ?? 0;
   const a = ev.away.score ?? 0;
+  const scored = (plays || []).filter((p) => FLOW_GOAL.test(p.type) && p.side);
   let goals = ev.incidents.filter((i) => i.kind === 'goal');
-  if ((!ev.goalsComplete || goals.length !== h + a) && plays?.length) {
-    const fromPlays = plays.filter((p) => FLOW_GOAL.test(p.type) && p.side).map((p) => ({
-      kind: 'goal', team: p.side === 'home' ? ev.home.id : ev.away.id, who: p.who || '', og: p.type === 'own-goal', pen: p.type === 'penalty---scored',
-      min: { base: p.base, extra: p.extra, period: p.period },
+  if ((!ev.goalsComplete || goals.length !== h + a) && scored.length) {
+    const fromPlays = scored.map((p) => ({
+      kind: 'goal', team: p.side === 'home' ? ev.home.id : ev.away.id, who: p.who || '', full: p.full || '', og: p.type === 'own-goal', pen: p.type === 'penalty---scored',
+      min: { base: p.base, extra: p.extra, period: p.period }, how: p.how, assist: p.assist, context: p.context,
     }));
     const count = (id) => fromPlays.filter((g) => g.team === id).length;
-    if (count(ev.home.id) === h && count(ev.away.id) === a) goals = fromPlays;
+    if (count(ev.home.id) === h && count(ev.away.id) === a) return fromPlays;
   }
-  return goals.length === h + a ? goals : null;
+  if (goals.length !== h + a) return null;
+  // O placar traz o autor; o lance a lance, como foi o gol e quem deu o passe.
+  return goals.map((g) => {
+    const side = g.team === ev.home.id ? 'home' : 'away';
+    const p = scored.find((x) => x.side === side && x.base === g.min.base && (x.extra || 0) === (g.min.extra || 0));
+    return p ? { ...g, full: g.full || p.full, how: p.how, assist: p.assist, context: p.context } : g;
+  });
 }
 
 // Quem foi melhor num trecho do jogo, pela pressão do lance a lance (chutes, escanteios, faltas perto da área).
@@ -755,6 +788,16 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   if (live && ahead && dom.side === other(ahead) && dom.strong && !paragraphs.some((x) => x.includes('mais volume'))) {
     const sharpWords = dom.aim?.[ahead] >= 0.6 ? 'acertou quase tudo o que chutou' : 'aproveitou melhor as chances';
     close = `${Name(ahead)} finaliza bem menos, mas ${sharpWords}.${close ? ` ${close}` : ''}`;
+  }
+  // Ao vivo, time que ainda não chutou a gol (a partir dos 15 minutos): diz muito sobre o jogo.
+  const clock = live && !ev.status.half ? liveClock(ev) : null;
+  if (clock && (clock.period === 2 || clock.base >= 15)) {
+    const idle = ['home', 'away'].filter((side) => stats?.[T(side).id]?.totalShots === 0);
+    if (idle.length === 1) {
+      const pos = stats[T(idle[0]).id].possessionPct;
+      const note = `${Name(idle[0])}${Number.isFinite(pos) && pos <= 40 ? ', com pouca bola,' : ''} ainda não finalizou.`;
+      close = close ? `${close} ${note}` : note;
+    } else if (idle.length === 2) close = close ? `${close} Ninguém finalizou até agora.` : 'Ninguém finalizou até agora.';
   }
   if (close) paragraphs.push(close);
   return paragraphs;

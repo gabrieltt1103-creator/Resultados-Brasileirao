@@ -119,6 +119,7 @@ export function parseEvent(e) {
       min: parseMinute(d.clock?.displayValue),
       // "Memphis Depay" cabe; "Alexander Barboza" vira "A. Barboza".
       who: (a?.displayName && a.displayName.length <= 14 ? a.displayName : a?.shortName || a?.displayName) || '',
+      full: a?.displayName || '',
       pen: !!d.penaltyKick,
       og: !!d.ownGoal,
       // Cartão sem jogador: técnico ou alguém da comissão técnica (o time não fica com um a menos).
@@ -213,6 +214,15 @@ const WHO_IN = {
   'red-card': /^([^():!.]+?)\s*\(/, retired: /^(.+?)\s+went off injured/i,
 };
 const KEEPER = /saved\b.*\bby\s+([^():!]+?)\s*\(/i;
+// Como saiu o gol, pelo texto do lance: "header", "from outside the box", "Assisted by Josué with a cross following a corner".
+const ASSIST = /Assisted by ([^.]+?)(?: with (?:a|an) (cross|through ball|headed pass))?(?: following (?:a|an) (fast break|corner|set piece situation))?\.\s*$/i;
+function goalDetail(type, text) {
+  const how = type === 'goal---header' ? 'header' : type === 'goal---free-kick' || /from a free kick/i.test(text) ? 'free-kick'
+    : type === 'goal---volley' ? 'volley' : /from outside the box/i.test(text) ? 'outside' : '';
+  const a = ASSIST.exec(text);
+  const context = a?.[3] || /following (?:a|an) (fast break|corner|set piece situation)\.\s*$/i.exec(text)?.[1] || '';
+  return { how, assist: a ? { name: a[1].trim(), with: (a[2] || '').toLowerCase() } : null, context: context.toLowerCase() };
+}
 const shortName = (name) => {
   if (!name || name.length <= 14) return name || '';
   const parts = name.split(/\s+/);
@@ -225,7 +235,9 @@ const shortName = (name) => {
  * side: 'home' ou 'away' (null em lances sem time, como o apito inicial); x: posição no campo no
  * sentido do ataque de quem fez o lance (0 = o próprio gol, 100 = o gol adversário); who: autor do gol
  * (ou do gol contra), do gol anulado pelo VAR, do pênalti perdido, do expulso ou de quem saiu machucado sem
- * substituições; keeper: goleiro que defendeu o pênalti.
+ * substituições (full: o nome inteiro); keeper: goleiro que defendeu o pênalti. Nos gols, how ('header',
+ * 'free-kick', 'volley', 'outside'), assist ({name, with: 'cross' | 'through ball' | 'headed pass' | ''}) e
+ * context ('fast break', 'corner', 'set piece situation').
  */
 export function parseSummaryPlays(json) {
   const side = new Map();
@@ -248,7 +260,9 @@ export function parseSummaryPlays(json) {
       x: Number.isFinite(p.fieldPositionX) ? p.fieldPositionX : null,
       t: x.time?.value ?? null,
       who: WHO_IN[type] ? shortName(WHO_IN[type].exec(x.text || p.text || '')?.[1]) : '',
+      full: WHO_IN[type] ? (WHO_IN[type].exec(x.text || p.text || '')?.[1] || '').trim() : '',
       keeper: type === 'penalty---saved' ? shortName(KEEPER.exec(x.text || p.text || '')?.[1]) : '',
+      ...(/^goal/.test(type) ? goalDetail(type, x.text || p.text || '') : {}),
     });
   }
   return out;

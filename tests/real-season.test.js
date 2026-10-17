@@ -182,7 +182,7 @@ test('leitura de um jogo ao vivo com os dados reais da ESPN', () => {
   const plays = parseSummaryPlays(aoVivo.resumo);
   const flow = matchFlow(plays, liveClock(ev));
   assert.deepEqual(matchReading(ev, { plays, stats: parseSummaryStats(aoVivo.resumo), flow }), [
-    "O Botafogo é melhor até aqui, finalizando o dobro do Coritiba. Mesmo assim, foi o Coritiba que abriu o placar, aos 22', num gol contra de F. Marçal. " +
+    "O Botafogo é melhor até aqui, finalizando o dobro do Coritiba. Mesmo assim, foi o Coritiba que abriu o placar, aos 22', num gol contra de Fernando Marçal. " +
       "O Botafogo chegou a marcar aos 26', com Danilo Santos, mas o VAR anulou. O empate veio pouco depois, aos 34', com o próprio Danilo Santos.",
     // Nos acréscimos do 1º tempo (45+2'), os últimos minutos ainda são do 1º tempo.
     'O Botafogo continua em cima, atrás da virada.',
@@ -205,7 +205,7 @@ test('leitura ao vivo: 3 a 0 com pressão parecida não é "jogo equilibrado"', 
   assert.ok(lines.every((l) => !/equilibrad|parelho|disputado/.test(l)));
   assert.deepEqual(lines, [
     "O Athletico-PR foi letal no primeiro tempo: abriu o placar logo aos 6', com Leozinho. A Chapecoense acertou a trave. " +
-      "O Athletico-PR ampliou aos 29', com Luiz Gustavo, e fez o terceiro dois minutos depois, com Kevin Viveros.",
+      "O Athletico-PR ampliou aos 29', com Luiz Gustavo, e fez o terceiro dois minutos depois, com Kevin Viveros, após escanteio cobrado por Gilberto.",
     'No segundo tempo, a Chapecoense voltou melhor e acertou a trave.',
     // A Chapecoense finalizou o dobro; o Athletico-PR acertou 5 dos 6 chutes.
     'O Athletico-PR finaliza bem menos, mas acertou quase tudo o que chutou. A Chapecoense continua em cima, tentando diminuir.',
@@ -283,4 +283,31 @@ test('escalações: titulares por linha da formação, trocas, reservas e técni
   assert.match(pre, /As escalações saem cerca de uma hora antes do jogo/);
   assert.match(pre, /<p class="lu-coach">Vagner Mancini<\/p><p class="lu-coach">Artur Jorge<\/p>/);
   assert.equal(lineupsHtml({ ...ev, status: { kind: 'post' } }, null, null), '');
+});
+
+test('leitura ao vivo: jeito do gol, passe que conta a jogada e quem ainda não finalizou', () => {
+  // Botafogo 1 x 0 Chapecoense aos 22' (17/10/2026): só 4 lances de ataque, e o gráfico já aparece.
+  const ev = { id: 'x', date: new Date('2026-10-17T21:00Z'), status: { kind: 'live', label: "22'" }, goalsComplete: true,
+    home: { id: '6086', name: 'Botafogo', score: 1 }, away: { id: '9318', name: 'Chapecoense', score: 0 },
+    incidents: [{ kind: 'goal', team: '6086', who: 'T. Soares', full: 'Tiquinho Soares', min: { base: 7, extra: 0, label: "7'", sort: 7 } }] };
+  const c = (min, type, team, text) => ({ time: { displayValue: min }, text, play: { type: { type }, team: { displayName: team }, period: { number: 1 } } });
+  const json = {
+    header: { competitions: [{ competitors: [{ homeAway: 'home', team: { displayName: 'Botafogo' } }, { homeAway: 'away', team: { displayName: 'Chapecoense' } }] }] },
+    commentary: [
+      c("3'", 'offside', 'Botafogo', 'Offside, Botafogo. Vitinho is caught offside.'),
+      c("5'", 'shot-blocked', 'Botafogo', 'Attempt blocked. Matheus Martins (Botafogo) right footed shot from outside the box is blocked.'),
+      c("7'", 'goal---header', 'Botafogo', 'Goal! Botafogo 1, Chapecoense 0. Tiquinho Soares (Botafogo) header from the centre of the box to the bottom right corner. Assisted by Matheus Martins with a cross.'),
+      c("21'", 'shot-on-target', 'Botafogo', 'Attempt saved. Matheus Martins (Botafogo) right footed shot from outside the box is saved.'),
+    ],
+  };
+  const plays = parseSummaryPlays(json);
+  const goal = plays.find((p) => p.type === 'goal---header');
+  assert.deepEqual([goal.full, goal.how, goal.assist], ['Tiquinho Soares', 'header', { name: 'Matheus Martins', with: 'cross' }]);
+  const flow = matchFlow(plays, liveClock(ev));
+  assert.ok(flow, 'ao vivo, o gráfico aparece com poucos lances');
+  assert.equal(matchFlow(plays), null); // encerrado, com 4 lances, não
+  const stats = { 6086: { totalShots: 3, possessionPct: 63.5 }, 9318: { totalShots: 0, possessionPct: 36.5 } };
+  const lines = matchReading(ev, { plays, stats, flow });
+  assert.equal(lines[0], "O Botafogo é melhor até aqui: abriu o placar aos 7', de cabeça, com Tiquinho Soares, após cruzamento de Matheus Martins.");
+  assert.match(lines.at(-1), /A Chapecoense, com pouca bola, ainda não finalizou\.$/);
 });

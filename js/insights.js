@@ -429,7 +429,36 @@ export function matchFlow(plays, now = null) {
   };
   // Lances usados, com o minuto (posição no gráfico), para a leitura do jogo contar chutes e escanteios.
   const list = used.map((p) => ({ type: p.type, side: p.side, w: p.w, i: slotOf(p) }));
-  return { slots, half, home, away, net, goals, now: nowSlot, plays: used.length, list, label, slotOf };
+  // Trechos sem nenhum lance de ataque (o "buraco" no gráfico), com o que parou o jogo: atendimento e trocas.
+  const pauses = [];
+  const limit = nowSlot ?? slots;
+  for (const [a, b] of [[0, Math.min(half, limit)], [half, limit]]) {
+    let run = null;
+    const close = () => {
+      if (run && run.to - run.from + 1 >= 5) {
+        const prev = Math.max(a - 1, ...list.filter((p) => p.i < run.from).map((p) => p.i));
+        const next = list.filter((p) => p.i > run.to).map((p) => p.i).reduce((m, i) => Math.min(m, i), Infinity);
+        const raw = { from: prev + 1, to: Number.isFinite(next) ? next - 1 : null };
+        const end = raw.to ?? limit - 1;
+        const stops = plays.filter((p) => p.period && slotOf(p) >= raw.from && slotOf(p) <= end);
+        // No começo do tempo não há onda de antes: só conta trecho de 8 minutos ou mais sem lance.
+        if (end - raw.from + 1 >= 8) {
+          pauses.push({
+            ...run, raw, closed: Number.isFinite(next),
+            subs: stops.filter((p) => p.type === 'substitution').length,
+            injured: [...new Set(stops.filter((p) => p.type === 'start-delay' && p.who).map((p) => p.full || p.who))],
+            delays: stops.filter((p) => p.type === 'start-delay').length,
+          });
+        }
+      }
+      run = null;
+    };
+    for (let i = a; i < b; i++) {
+      if (home[i] + away[i] < 0.15) { if (run) run.to = i; else run = { from: i, to: i }; } else close();
+    }
+    close();
+  }
+  return { slots, half, home, away, net, goals, now: nowSlot, plays: used.length, list, label, slotOf, pauses };
 }
 
 // ---------- leitura do jogo ----------
@@ -578,6 +607,15 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
     // Machucado depois das cinco substituições: o time fica com um a menos.
     if (p.type === 'retired') events.push({ kind: 'hurt', side: p.side, min, half: p.period, who: p.who });
   }
+  // Trecho longo sem ataque, já terminado: 10 minutos ou mais com o jogo parado (atendimento, trocas), e a
+  // leitura conta por quê; sem nada que parasse o jogo, só um trecho bem longo (15 minutos) vira assunto.
+  for (const p of flow?.pauses || []) {
+    if (!p.closed || p.raw.to - p.raw.from + 1 < (p.subs || p.delays ? 10 : 15)) continue;
+    const m = /(\d+)(?:\+(\d+))?/.exec(flow.label(p.raw.from));
+    const half = p.raw.from < flow.half ? 1 : 2;
+    events.push({ kind: 'pause', side: null, min: { base: Number(m[1]), extra: Number(m[2] || 0), period: half }, half,
+      from: flow.label(p.raw.from), to: flow.label(p.raw.to), subs: p.subs, injured: p.injured, delays: p.delays });
+  }
   const order = (e) => e.half * 1000 + (e.min.base ?? 0) + (e.min.extra || 0) / 100;
   events.sort((x, y) => order(x) - order(y));
 
@@ -588,6 +626,7 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
   const byPlayer = new Map();
   const reds = { home: 0, away: 0 };
   for (const e of events) {
+    if (e.kind === 'pause') continue;
     e.diff = e.side === 'home' ? sh - sa : sa - sh;
     e.total = sh + sa;
     if (e.kind === 'red' || e.kind === 'hurt') e.n = ++reds[e.side];
@@ -750,6 +789,10 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
         const text = `ficou com ${e.n > 1 ? 'dois' : 'um'} a menos aos ${min}${e.who ? `, com a expulsão de ${e.who}` : ''}`;
         if (fresh && lead === e.side) { out[0] += `, mas ${text}`; subj = e.side; inSentence = 0; } else if (prev?.kind === 'red' && prev.side === e.side) out[out.length - 1] += `, e com ${e.n > 2 ? 'mais um' : 'dois'} a menos aos ${min}${e.who ? `, com a expulsão de ${e.who}` : ''}`;
         else push(`${pre}${who(e.side)}${text}`, e.side);
+      } else if (e.kind === 'pause') {
+        const why = [e.injured.length ? `o atendimento a ${e.injured.join(' e ')}` : e.delays ? 'uma interrupção' : '',
+          e.subs ? (e.subs > 1 ? `${NUM[e.subs] || e.subs} substituições` : 'uma substituição') : ''].filter(Boolean);
+        push(`${pre}entre os ${e.from} e os ${e.to}, ${why.length ? `o jogo ficou parado, com ${why.join(' e ')}` : 'ninguém chegou ao ataque'}`, null);
       } else if (e.kind === 'staff') {
         push(`${pre}a comissão técnica ${doo(T(e.side).name)} levou um vermelho aos ${min}, sem tirar jogador de campo`, null);
       } else if (e.kind === 'hurt') {

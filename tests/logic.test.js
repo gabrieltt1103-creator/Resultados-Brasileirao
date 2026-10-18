@@ -609,6 +609,25 @@ test('técnico: Wikipédia e Wikidata, com troca recente valendo mais', () => {
   assert.ok(!coachFits(coach, game('post', '2026-10-08T19:00Z'), Date.parse('2026-10-08T21:00Z')));
 });
 
+test('trecho sem ataque: faixa no gráfico; na leitura, só se for longo ou se o jogo parou', () => {
+  const t = (id, name) => ({ id, name, score: 0 });
+  const ev = { id: 'x', status: { kind: 'post' }, home: t('h', 'Grêmio'), away: t('a', 'Cruzeiro'), goalsComplete: true, incidents: [] };
+  const play = (type, side, base) => ({ type, side, period: base > 45 ? 2 : 1, base, extra: 0, x: null });
+  const busy = (from, to) => Array.from({ length: to - from + 1 }, (_, k) => play(k % 2 ? 'shot-off-target' : 'corner-awarded', k % 3 ? 'home' : 'away', from + k));
+  const reading = (plays) => matchReading(ev, { plays, flow: matchFlow(plays) }).join(' ');
+  // 12 minutos sem ataque (do 21' ao 32') e sem nada que parasse o jogo: faixa "morno", sem frase.
+  const quiet = [...busy(1, 20), ...busy(33, 90)];
+  const f = matchFlow(quiet);
+  assert.deepEqual(f.pauses.map((p) => [f.label(p.raw.from), f.label(p.raw.to), p.subs + p.delays]), [["21'", "32'", 0]]);
+  assert.doesNotMatch(reading(quiet), /Entre os/);
+  // 16 minutos: aí vira assunto.
+  const long = [...busy(1, 20), ...busy(37, 90)];
+  assert.match(reading(long), /entre os 21' e os 36', ninguém chegou ao ataque/i);
+  // 12 minutos com uma troca e um atendimento: o jogo ficou parado.
+  const stopped = [...quiet, play('substitution', 'home', 25), { ...play('start-delay', 'away', 28), who: 'Kaio Jorge' }];
+  assert.match(reading(stopped), /Entre os 21' e os 32', o jogo ficou parado, com o atendimento a Kaio Jorge e uma substituição\./);
+});
+
 test('leitura ao vivo nos primeiros minutos: começo de jogo, sem "esfriou"', () => {
   const t = (id, name) => ({ id, name, score: 0 });
   const game = (label) => ({ id: 'x', status: { kind: 'live', label }, home: t('h', 'Atlético-MG'), away: t('a', 'Coritiba'), goalsComplete: true, incidents: [] });

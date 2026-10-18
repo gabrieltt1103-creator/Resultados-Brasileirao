@@ -212,6 +212,8 @@ const WHO_IN = {
   goal: SCORER, 'goal---header': SCORER, 'goal---volley': SCORER, 'goal---free-kick': SCORER, 'penalty---scored': SCORER, 'own-goal': /^Own Goal by ([^,(]+?)\s*[,(]/i,
   // "Wallace Yan (RB Bragantino) is shown the red card." e "Arthur Chaves went off injured after Botafogo had used all subs."
   'red-card': /^([^():!.]+?)\s*\(/, retired: /^(.+?)\s+went off injured/i,
+  // "Delay in match because of an injury Neymar (Santos)."
+  'start-delay': /injury\s+([^()]+?)\s*\(/i,
 };
 const KEEPER = /saved\b.*\bby\s+([^():!]+?)\s*\(/i;
 // Como saiu o gol, pelo texto do lance: "header", "from outside the box", "Assisted by Josué with a cross following a corner".

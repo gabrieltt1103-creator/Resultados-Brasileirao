@@ -1321,6 +1321,18 @@ details[open] > summary::before { transform: rotate(45deg); }
 .flow .ht { fill: var(--muted); opacity: 0.45; }
 .flow .now { fill: var(--live); }
 .flow .future { fill: var(--surface); opacity: 0.65; }
+.flow-pause {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  background: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--muted) 16%, transparent) 4px 5px);
+}
+.flow-pause i { font-style: normal; font-size: 10px; line-height: 1; color: var(--muted); background: var(--surface); padding: 2px; border-radius: 3px; }
+/* O rótulo só aparece quando cabe dentro da faixa (em tela estreita, a faixa fica fina). */
+.flow-pause { container-type: inline-size; }
+@container (max-width: 40px) { .flow-pause i { display: none; } }
 .flow-goal { position: absolute; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 2px var(--ink); }
 .flow-goal.h { top: 3px; }
 .flow-goal.a { bottom: 3px; }

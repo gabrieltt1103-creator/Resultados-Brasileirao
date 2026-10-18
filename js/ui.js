@@ -358,10 +358,23 @@ function fact(label, ev) {
 
 // ---------- telas de detalhe ----------
 
+// Trecho sem lance de ataque: uma faixa que diz por quê (parado: atendimento, trocas; morno: só ninguém chegou).
+function pauseBand(flow, p, at) {
+  const stopped = p.subs || p.delays;
+  const why = [p.injured.length ? `atendimento a ${p.injured.join(' e ')}` : p.delays ? 'jogo interrompido' : '',
+    p.subs ? `${p.subs} ${p.subs > 1 ? 'substituições' : 'substituição'}` : ''].filter(Boolean).join(', ');
+  const span = `${flow.label(p.raw.from)}–${p.raw.to != null ? flow.label(p.raw.to) : 'agora'}`;
+  const title = `${span}: sem lances de ataque${why ? ` (${why})` : ''}`;
+  // Do minuto seguinte ao último lance até o anterior ao próximo (ou até agora); o rótulo some se não couber.
+  const to = (p.raw.to ?? (flow.now ?? flow.slots) - 1) + 1;
+  return `<span class="flow-pause" style="left:${at(p.raw.from)};width:${at(to - p.raw.from)}" title="${esc(title)}"><i>${stopped ? 'parado' : 'morno'}</i></span>`;
+}
+
 /**
  * Fluxo da partida: pressão de cada time minuto a minuto (mandante para cima, visitante para baixo),
  * com os gols e o intervalo; num jogo ao vivo, o que ainda não aconteceu fica apagado. Cada time tem a
- * sua barra no mesmo minuto: espaço vazio é jogo parado; barra dos dois lados é jogo lá e cá.
+ * sua barra no mesmo minuto: espaço vazio é jogo parado; barra dos dois lados é jogo lá e cá;
+ * trecho longo sem ataque ganha uma faixa.
  */
 export function flowChart(flow, ev, note = '') {
   const W = flow.slots * 4;
@@ -380,6 +393,7 @@ export function flowChart(flow, ev, note = '') {
     <div class="flow-teams" aria-hidden="true">${crest(ev.home.logo, ev.home.name, 18, 'mini')}${crest(ev.away.logo, ev.away.name, 18, 'mini')}</div>
     <div class="flow-plot">
       <svg viewBox="0 0 ${W} 100" preserveAspectRatio="none" aria-hidden="true"><rect class="mid" x="0" y="49.6" width="${W}" height="0.8"/>${bars}<rect class="ht" x="${flow.half * 4 - 0.75}" y="0" width="1.5" height="100"/>${now}</svg>
+      ${(flow.pauses || []).map((p) => pauseBand(flow, p, at)).join('')}
       ${flow.goals.map((g) => `<i class="flow-goal ${g.side === 'home' ? 'h' : 'a'}" style="left:${at(g.i + 0.5)}"></i>`).join('')}
     </div>
     <div class="flow-axis" aria-hidden="true"><span>0'</span><span style="left:${at(flow.half)}">intervalo</span><span>${esc(flow.label(flow.slots - 1))}</span></div>

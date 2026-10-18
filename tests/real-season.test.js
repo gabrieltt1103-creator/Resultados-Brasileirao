@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { buildRounds, dropReplaced, pickDefault } from '../js/rounds.js';
 import { parseEvent, parseHeadToHead, parseSummaryLineups, parseSummaryPlays, parseSummaryStats } from '../js/espn.js';
-import { lineupsHtml, withSubs } from '../js/ui.js';
+import { flowChart, lineupsHtml, withSubs } from '../js/ui.js';
 import { h2hSummary, liveClock, matchFlow, matchReading } from '../js/insights.js';
 import { computeTable, reconcile, zonesFor } from '../js/table.js';
 import { secador } from '../js/sim.js';
@@ -210,6 +210,33 @@ test('leitura ao vivo: 3 a 0 com pressão parecida não é "jogo equilibrado"', 
     // A Chapecoense finalizou o dobro; o Athletico-PR acertou 5 dos 6 chutes.
     'O Athletico-PR finaliza bem menos, mas acertou quase tudo o que chutou. A Chapecoense continua em cima, tentando diminuir.',
   ]);
+});
+
+// Fluminense 1 x 2 Santos ao vivo (18/10/2026, 83'): placar, resumo e lance a lance reais da ESPN.
+const pausaAoVivo = JSON.parse(fs.readFileSync(new URL('./data/fluminense-santos-ao-vivo.json', import.meta.url)));
+
+test('buraco no gráfico: trecho sem ataque vira faixa, e a leitura conta o que parou o jogo', () => {
+  const ev = parseEvent(pausaAoVivo.evento);
+  const plays = parseSummaryPlays(pausaAoVivo.resumo);
+  const flow = matchFlow(plays, liveClock(ev));
+  // Do 62' ao 74', nenhum lance de ataque: atendimento a Neymar e duas trocas do Santos.
+  assert.deepEqual(flow.pauses.map((p) => [flow.label(p.raw.from), flow.label(p.raw.to), p.closed, p.subs, p.injured]),
+    [["62'", "74'", true, 2, ['Neymar']]]);
+  const chart = flowChart(flow, ev);
+  assert.match(chart, /class="flow-pause"[^>]*title="62&#39;–74&#39;: sem lances de ataque \(atendimento a Neymar, 2 substituições\)"><i>parado<\/i>/);
+  assert.deepEqual(matchReading(ev, { plays, stats: parseSummaryStats(pausaAoVivo.resumo), flow }), [
+    "Primeiro tempo bem disputado. O Fluminense abriu o placar logo aos 4', com Rodrigo Castillo, após escanteio cobrado por Igor Rabello.",
+    "No segundo tempo, o Santos domina: empatou aos 49', com Gabriel Barbosa, e virou aos 54', de cabeça, com Philippe Coutinho. " +
+      "Entre os 62' e os 74', o jogo ficou parado, com o atendimento a Neymar e duas substituições.",
+    'Nos últimos minutos, os dois times foram para cima: jogo lá e cá.',
+  ]);
+  // Ainda sem lance depois do buraco (ao vivo, aos 72'): a faixa vai até agora, e a leitura espera o trecho acabar.
+  const at72 = { ...ev, status: { ...ev.status, label: "72'" } };
+  const before = plays.filter((p) => p.period === 1 || p.base <= 72);
+  const open = matchFlow(before, liveClock(at72));
+  assert.deepEqual(open.pauses.map((p) => [open.label(p.raw.from), p.raw.to, p.closed]), [["62'", null, false]]);
+  assert.match(flowChart(open, at72), /title="62&#39;–agora: sem lances de ataque/);
+  assert.doesNotMatch(matchReading(at72, { plays: before, flow: open }).join(' '), /parado|ninguém chegou/);
 });
 
 test('vermelho sem jogador é da comissão técnica: o time segue com onze', () => {

@@ -7,7 +7,7 @@ import { parseEvent, parseHeadToHead, parseSummaryLineups, parseSummaryPlays, pa
 import { flowChart, lineupsHtml, withSubs } from '../js/ui.js';
 import { h2hSummary, liveClock, matchFlow, matchReading } from '../js/insights.js';
 import { computeTable, reconcile, zonesFor } from '../js/table.js';
-import { secador } from '../js/sim.js';
+import { matchOdds, model, priorFrom, secador } from '../js/sim.js';
 import { objectiveFor, pick, rivalsOf, stakeOf, verdict } from '../js/secador.js';
 
 const snap = JSON.parse(fs.readFileSync(new URL('./data/brasileirao-2026.json', import.meta.url)));
@@ -97,6 +97,47 @@ test('fluxo da partida pelo lance a lance', () => {
   assert.equal(matchFlow(plays.slice(0, 8)), null);
 });
 
+// Temporada 2025 completa (ESPN): placar e chutes no gol de cada jogo.
+const s2025 = JSON.parse(fs.readFileSync(new URL('./data/brasileirao-2025.json', import.meta.url)));
+const games2025 = s2025.jogos.map(([id, date, h, a, hs, as, sh, sa]) => ({
+  id, date: new Date(date), status: { kind: 'post' }, home: { id: h, score: hs, sot: sh }, away: { id: a, score: as, sot: sa },
+}));
+
+test('força de partida pela temporada anterior: o começo do campeonato erra menos', () => {
+  const prior = priorFrom(games2025);
+  assert.equal(prior.size, 20);
+  const power = (m, id) => m.att.get(id) / m.def.get(id);
+  // Campeão de 2025 (Flamengo) bem acima da média; o lanterna (Sport), bem abaixo.
+  assert.ok(prior.get('819').att > 1.2 && prior.get('819').def < 0.8);
+  assert.ok(prior.get('7635').att < 0.85 && prior.get('7635').def > 1.25);
+  // Antes do primeiro jogo de 2026: a força de 2025; quem subiu (Chapecoense) começa na média dos que sobem.
+  const rows = new Map(Object.keys(snap.times).map((id) => [id, { id }]));
+  const start = model(rows, [], prior);
+  assert.ok(power(start, '819') > power(start, '2029') && power(start, '2029') > power(start, '9318'));
+  assert.ok(Math.abs(start.att.get('9318') / start.att.get('3456') - 1) < 1e-9); // Chapecoense e Coritiba subiram juntos
+  // Cada jogo de 2026 previsto só com os jogos dos dias anteriores (do 10º ao 100º jogo): com a temporada
+  // anterior, as previsões erram menos (RPS) do que só com 2026, e as duas, menos que chutar a média.
+  const played = dropReplaced(events).filter((e) => e.status.kind === 'post').sort((x, y) => x.date - y.date);
+  const rps = (pick) => {
+    let sum = 0;
+    let n = 0;
+    for (let i = 10; i < 100; i++) {
+      const e = played[i];
+      const past = played.filter((x) => x.date < e.date - 6 * 36e5);
+      const o = matchOdds(pick(past), e);
+      const [h, d] = e.home.score > e.away.score ? [1, 0] : e.home.score === e.away.score ? [0, 1] : [0, 0];
+      sum += ((o.home - h) ** 2 + (o.home + o.draw - h - d) ** 2) / 2;
+      n++;
+    }
+    return sum / n;
+  };
+  const withPrior = rps((past) => model(rows, past, prior));
+  const alone = rps((past) => model(rows, past));
+  const flat = rps((past) => model(rows, past.map((e) => ({ ...e, home: { ...e.home, score: 1 }, away: { ...e.away, score: 1 } }))));
+  assert.ok(withPrior < alone, `${withPrior} x ${alone}`);
+  assert.ok(alone < flat, `${alone} x ${flat}`);
+});
+
 // Últimos confrontos reais (ESPN, outubro de 2026), recortados.
 const confrontos = JSON.parse(fs.readFileSync(new URL('./data/confrontos-2026.json', import.meta.url)));
 
@@ -157,7 +198,8 @@ test('secador com a temporada real: rodada 31 para quatro torcedores', () => {
   assert.ok(v.values[0] - v.values[2] > 0.15);
   assert.equal(fla.at('Botafogo').kind, 'rival');
   assert.equal(fla.at('Fluminense').kind, 'none');
-  assert.equal(fla.at('São Paulo').kind, 'none'); // Vasco, com 4% de risco de cair, não vale a secada
+  // Vasco (14º), com 9% de risco de cair contando a força dos adversários que ainda enfrenta: vale a secada.
+  assert.equal(fla.at('São Paulo').kind, 'rival');
   // Fluminense (3º): seca o Flamengo, que briga pelo título (mesmo que a vitória dele ajudasse um pouco no G6).
   const flu = fan('Fluminense').at('Bahia');
   assert.ok(['pride', 'rival'].includes(flu.kind));

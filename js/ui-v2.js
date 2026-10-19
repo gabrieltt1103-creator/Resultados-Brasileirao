@@ -272,8 +272,8 @@ function changes({ real, sim, impact, zones, favorite, total, open }) {
 
 const HOW = (zones, open) => `<details class="v2-more" data-keep="how-odds"${open ? ' open' : ''}>
   <summary><span>Como calculamos</span>${CHEVRON}</summary>
-  <div class="v2-how"><p>Cada time tem uma força de ataque e uma de defesa, medidas pelos gols marcados e sofridos. A fase recente pesa mais: os últimos 5 jogos contam 40%, os últimos 10 contam 35% e o campeonato inteiro, 25%. Quem joga em casa ganha a vantagem que os mandantes têm tido neste Brasileirão.</p>
-  <p>Com essas forças, o app sorteia o placar de cada jogo que falta, refaz o campeonato 3.000 vezes e conta em quantas cada time termina campeão, no ${esc(zones.gLabel || 'G6')} ou no ${esc(zones.zLabel || 'Z4')}.</p></div>
+  <div class="v2-how"><p>Cada time tem uma força de ataque e uma de defesa, medidas pelos gols e pelos chutes no gol, descontando a força de quem ele enfrentou: fazer 2 gols no líder vale mais que no lanterna. Jogos antigos pesam menos, e a força do time no fim do Brasileirão passado é o ponto de partida (quem subiu começa como costumam começar os que sobem). Quem joga em casa ganha a vantagem que os mandantes têm tido neste Brasileirão.</p>
+  <p>Com essas forças, o app sorteia o placar de cada jogo que falta, refaz o campeonato 3.000 vezes e conta em quantas cada time termina campeão, no ${esc(zones.gLabel || 'G6')} ou no ${esc(zones.zLabel || 'Z4')}. Em cada uma, a força dos times varia um pouco (mais quando falta muito campeonato), porque ela pode mudar até o fim. Testado nos Brasileirões de 2015 a 2025, prevendo cada rodada só com o que se sabia antes.</p></div>
 </details>`;
 
 // Chances separadas por objetivo, só com quem está na disputa.

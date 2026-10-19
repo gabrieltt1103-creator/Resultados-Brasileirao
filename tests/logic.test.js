@@ -171,6 +171,22 @@ test('sugestão de placar e chances de cada jogo', () => {
   assert.ok(Number.isInteger(r.h) && Number.isInteger(r.a));
 });
 
+test('força dos times desconta a força dos adversários', () => {
+  // A e B fazem 2 x 1 em todos os jogos, mas A enfrentou os fortes e B, os fracos: A é mais forte.
+  const ids = ['S1', 'S2', 'W1', 'W2', 'A', 'B'];
+  const rows = new Map(ids.map((id) => [id, { id }]));
+  let n = 0;
+  const game = (h, a, hs, as) => ({ id: String(++n), date: new Date(2026, 4, 1 + n), status: { kind: 'post' }, home: { id: h, score: hs }, away: { id: a, score: as } });
+  const list = [];
+  for (let k = 0; k < 3; k++) {
+    list.push(game('S1', 'W1', 3, 0), game('S2', 'W2', 3, 0), game('W1', 'S2', 0, 3), game('W2', 'S1', 0, 3));
+    list.push(game('A', 'S1', 2, 1), game('S2', 'A', 1, 2), game('B', 'W1', 2, 1), game('W2', 'B', 1, 2));
+  }
+  const m = model(rows, list);
+  assert.ok(m.att.get('A') > m.att.get('B'));
+  assert.ok(m.def.get('A') < m.def.get('B')); // sofrer 1 gol de quem faz 3 nos outros vale mais
+});
+
 test('jogos recentes pesam mais que a temporada', () => {
   // Mesmo time e mesma temporada, mas gols concentrados nos últimos jogos: o ataque fica mais forte.
   const t = table.rows[10];

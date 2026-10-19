@@ -1,6 +1,6 @@
 // Simulação do restante do campeonato (Monte Carlo) e sorteio de placares.
-// Modelo simples de Poisson: força de ataque e de defesa de cada time pelos gols marcados e
-// sofridos, com vantagem de jogar em casa medida nos próprios jogos da temporada.
+// Modelo de Poisson: força de ataque e de defesa de cada time pelos gols e chutes no gol, descontando a
+// força dos adversários, com o mando de campo medido na temporada e a temporada anterior como ponto de partida.
 
 export function rng(seed = 1) {
   let a = seed >>> 0;
@@ -21,60 +21,120 @@ function poisson(lambda, rand) {
   return k - 1;
 }
 
-// Peso de cada janela na força do time: últimos 5 jogos, últimos 10 e a temporada (0 = todos).
-// Escolhidos testando na temporada 2026: cada jogo previsto só com os jogos anteriores a ele.
-export const WEIGHTS = [[0.40, 5], [0.35, 10], [0.25, 0]];
-// Cada janela recebe K jogos "fictícios" na média, para poucos jogos não pesarem demais.
-const K = 8;
+// Força dos times, com os parâmetros escolhidos testando de 2015 a 2026 (cada jogo e cada fim de campeonato
+// previstos só com o que se sabia antes):
+const HALF_LIFE = 240;   // dias: um jogo de 8 meses atrás pesa metade
+const K_PRIOR = 20;      // jogos fictícios na força de partida (a da temporada anterior)
+const K_FLAT = 10;       // sem a temporada anterior, jogos fictícios na média do campeonato
+const SHOTS = 0.25;      // peso dos chutes no gol (convertidos em gols) junto com os gols
+const CARRY = 0.8;       // a força do ano anterior, puxada para a média (expoente)
+// Quem subiu da Série B começa com a força média dos que subiram de 2015 a 2026.
+export const PROMOTED = { att: 0.89, def: 1.1 };
+
+const sotOf = (side) => side.sot ?? side.stats?.shotsOnTarget;
+
+/**
+ * Ajuste de Poisson (Maher, Dixon-Coles): ataque e defesa de cada time descontando a força de quem ele
+ * enfrentou, mando de campo medido na amostra, jogos antigos pesando menos e K jogos fictícios na força de
+ * partida (prior, Map id -> {att, def}; sem ela, 1 = média). Os gols de cada jogo entram misturados com os
+ * chutes no gol daquele jogo (mais estáveis que os gols). Devolve {avg, home, away, att, def}.
+ */
+function fit(games, ids, { prior = null, K = K_FLAT, half = HALF_LIFE } = {}) {
+  const n = ids.length;
+  const at = new Map(ids.map((id, i) => [id, i]));
+  const list = games.filter((e) => at.has(e.home.id) && at.has(e.away.id));
+  const t0 = list.reduce((m, e) => Math.max(m, +e.date || 0), 0);
+  let goals = 0;
+  let shots = 0;
+  for (const e of list) {
+    const h = sotOf(e.home);
+    const a = sotOf(e.away);
+    if (h != null && a != null) { goals += e.home.score + e.away.score; shots += h + a; }
+  }
+  const conv = shots ? goals / shots : 0.3; // gols por chute no gol
+  const value = (score, sot) => (sot != null && shots ? (1 - SHOTS) * score + SHOTS * conv * sot : score);
+  const G = list.map((e) => ({
+    h: at.get(e.home.id), a: at.get(e.away.id),
+    hs: value(e.home.score, sotOf(e.home)), as: value(e.away.score, sotOf(e.away)),
+    w: half && t0 ? 0.5 ** ((t0 - (+e.date || t0)) / 864e5 / half) : 1,
+  }));
+  const W = G.reduce((s, g) => s + g.w, 0);
+  const avg = W ? Math.max(0.6, G.reduce((s, g) => s + g.w * (g.hs + g.as), 0) / (2 * W)) : 1.2;
+  const p0 = (k) => ids.map((id) => prior?.get(id)?.[k] ?? (prior ? PROMOTED[k] : 1));
+  const pa = p0('att');
+  const pd = p0('def');
+  const att = Float64Array.from(pa);
+  const def = Float64Array.from(pd);
+  let hf = 1.14; // sem jogos suficientes, o mando de sempre (1,3 gol do mandante para cada 1 do visitante)
+  let af = 0.88;
+  const y = new Float64Array(n);
+  const x = new Float64Array(n);
+  for (let it = 0; it < 30; it++) {
+    if (G.length >= 30) {
+      let hy = 0, he = 0, ay = 0, ae = 0;
+      for (const g of G) {
+        hy += g.w * g.hs; he += g.w * avg * att[g.h] * def[g.a];
+        ay += g.w * g.as; ae += g.w * avg * att[g.a] * def[g.h];
+      }
+      hf = hy / he;
+      af = ay / ae;
+    }
+    // Ataque: gols feitos sobre os esperados contra aquelas defesas; depois a defesa, contra aqueles ataques.
+    y.fill(0); x.fill(0);
+    for (const g of G) {
+      y[g.h] += g.w * g.hs; x[g.h] += g.w * avg * def[g.a] * hf;
+      y[g.a] += g.w * g.as; x[g.a] += g.w * avg * def[g.h] * af;
+    }
+    for (let i = 0; i < n; i++) att[i] = (y[i] + K * avg * pa[i]) / (x[i] + K * avg);
+    y.fill(0); x.fill(0);
+    for (const g of G) {
+      y[g.a] += g.w * g.hs; x[g.a] += g.w * avg * att[g.h] * hf;
+      y[g.h] += g.w * g.as; x[g.h] += g.w * avg * att[g.a] * af;
+    }
+    for (let i = 0; i < n; i++) def[i] = (y[i] + K * avg * pd[i]) / (x[i] + K * avg);
+    // Média geométrica 1 no ataque e na defesa: o nível do campeonato fica em avg e no mando.
+    for (const v of [att, def]) {
+      const gm = Math.exp(v.reduce((s, z) => s + Math.log(z), 0) / n);
+      for (let i = 0; i < n; i++) v[i] /= gm;
+    }
+  }
+  // Nível: os gols esperados somam os gols da amostra.
+  let exp = 0;
+  let real = 0;
+  for (const g of G) {
+    exp += g.w * avg * (att[g.h] * def[g.a] * hf + att[g.a] * def[g.h] * af);
+    real += g.w * (g.hs + g.as);
+  }
+  return {
+    avg: avg * (exp ? real / exp : 1),
+    home: hf,
+    away: af,
+    att: new Map(ids.map((id, i) => [id, att[i]])),
+    def: new Map(ids.map((id, i) => [id, def[i]])),
+  };
+}
+
+const done = (events) => events.filter((e) => e.status.kind === 'post' && e.home.score != null && e.away.score != null);
 
 /**
  * Força de ataque e de defesa de cada time (1 = média do campeonato) e vantagem de jogar em casa.
- * rows: tabela com todos os jogos encerrados (gp, gf, ga); events: jogos, para as janelas recentes.
+ * rows: tabela (os times); events: jogos da temporada; prior: força de partida pela temporada anterior
+ * (priorFrom), que pesa como K_PRIOR jogos, com quem subiu na força média dos que sobem.
  */
-export function model(rows, events) {
-  const list = [...rows.values()];
-  const gp = list.reduce((s, r) => s + r.gp, 0);
-  const goals = list.reduce((s, r) => s + r.gf, 0);
-  const avg = gp ? Math.max(0.6, goals / gp) : 1.2;
-  let hg = 0;
-  let ag = 0;
-  let n = 0;
-  const recent = new Map();
-  const done = events.filter((e) => e.status.kind === 'post' && e.home.score != null).sort((x, y) => x.date - y.date);
-  for (const e of done) {
-    hg += e.home.score;
-    ag += e.away.score;
-    n++;
-    for (const [id, gf, ga] of [[e.home.id, e.home.score, e.away.score], [e.away.id, e.away.score, e.home.score]]) {
-      if (!recent.has(id)) recent.set(id, []);
-      recent.get(id).push([gf, ga]);
-    }
-  }
-  const ratio = n >= 30 && ag > 0 ? Math.min(1.8, Math.max(1, hg / ag)) : 1.3;
-  const rate = (r, i) => {
-    let sum = 0;
-    for (const [w, k] of WEIGHTS) {
-      let total;
-      let games;
-      if (k) {
-        const last = (recent.get(r.id) || []).slice(-k);
-        total = last.reduce((s, g) => s + g[i], 0);
-        games = last.length;
-      } else {
-        total = i === 0 ? r.gf : r.ga;
-        games = r.gp;
-      }
-      sum += w * ((total + K * avg) / (games + K));
-    }
-    return sum / avg;
-  };
-  const att = new Map();
-  const def = new Map();
-  for (const r of list) {
-    att.set(r.id, rate(r, 0));
-    def.set(r.id, rate(r, 1));
-  }
-  return { avg, home: Math.sqrt(ratio), away: 1 / Math.sqrt(ratio), att, def };
+export function model(rows, events, prior = null) {
+  return fit(done(events), [...rows.keys()], prior?.size ? { prior, K: K_PRIOR } : {});
+}
+
+/**
+ * Força de partida para a temporada seguinte, pelos jogos da temporada anterior: a força final de cada
+ * time, puxada para a média. Map id -> {att, def}.
+ */
+export function priorFrom(events) {
+  const games = done(events);
+  const ids = [...new Set(games.flatMap((e) => [e.home.id, e.away.id]))];
+  if (ids.length < 4 || games.length < ids.length * 4) return null;
+  const m = fit(games, ids, { half: 0 });
+  return new Map(ids.map((id) => [id, { att: m.att.get(id) ** CARRY, def: m.def.get(id) ** CARRY }]));
 }
 
 export function expectedGoals(m, homeId, awayId) {
@@ -163,7 +223,7 @@ function remaining(ev) {
  * jogos ao vivo (com o que falta sortear) e todo confronto que ainda não aconteceu.
  * Devolve null quando não dá para saber quais jogos faltam.
  */
-function prepare({ finished, events, overrides = {} }) {
+function prepare({ finished, events, overrides = {}, prior = null }) {
   const rows = [...finished.values()];
   const n = rows.length;
   if (n < 4) return null;
@@ -184,7 +244,7 @@ function prepare({ finished, events, overrides = {} }) {
   };
 
   // Jogos fixados (simulados pelo usuário) e ao vivo (sorteia só o que falta).
-  const m = model(finished, events);
+  const m = model(finished, events, prior);
   const live = [];
   const taken = new Set(played);
   for (const e of events) {
@@ -219,7 +279,27 @@ function prepare({ finished, events, overrides = {} }) {
   }
   for (const [h, a] of left) { count[h]++; count[a]++; }
   if (count.some((c) => c !== perTeam)) return null;
-  return { rows, n, idx, pts, w, gd, gf, live, left };
+  return { rows, n, idx, pts, w, gd, gf, live, left, spread: spreadFor(left.length + live.length, n) };
+}
+
+// Incerteza da força: em cada campeonato sorteado, a força de cada time varia um pouco (desvio do log do
+// ataque e da defesa), mais quando falta muito campeonato: a força medida tem erro e muda até o fim (técnico,
+// lesões, reforços). Sem isso, as chances ficavam confiantes demais: o que o modelo dava como menos de 2%
+// acontecia 5 vezes mais do que isso (temporadas de 2015 a 2025).
+const spreadFor = (left, n) => 0.02 + 0.15 * Math.sqrt(Math.min(1, left / Math.max(1, n * (n - 1))));
+
+function gauss(rand) {
+  let u = 0;
+  while (u === 0) u = rand();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
+}
+
+// Sorteia a força de cada time para um campeonato: fator do ataque (ea) e da defesa (ed).
+function jolt(ea, ed, spread, rand) {
+  for (let i = 0; i < ea.length; i++) {
+    ea[i] = Math.exp(spread * gauss(rand));
+    ed[i] = Math.exp(spread * gauss(rand));
+  }
 }
 
 /**
@@ -227,10 +307,10 @@ function prepare({ finished, events, overrides = {} }) {
  * finished: Map id -> linha com todos os jogos encerrados (precisa da temporada completa).
  * Devolve null quando não dá para saber quais jogos faltam.
  */
-export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7 }) {
-  const prep = prepare({ finished, events, overrides });
+export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7, prior = null }) {
+  const prep = prepare({ finished, events, overrides, prior });
   if (!prep) return null;
-  const { rows, n, pts, w, gd, gf, live, left } = prep;
+  const { rows, n, pts, w, gd, gf, live, left, spread } = prep;
 
   const rand = rng(seed);
   const posCount = new Uint32Array(n * n);
@@ -240,15 +320,18 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
   const D = new Float64Array(n);
   const F = new Float64Array(n);
   const jitter = new Float64Array(n);
+  const ea = new Float64Array(n);
+  const ed = new Float64Array(n);
   const order = Array.from({ length: n }, (_, i) => i);
   for (let s = 0; s < runs; s++) {
     P.set(pts); W.set(w); D.set(gd); F.set(gf);
+    jolt(ea, ed, spread, rand);
     const play = (h, a, hs, as) => {
       F[h] += hs; F[a] += as; D[h] += hs - as; D[a] += as - hs;
       if (hs > as) { P[h] += 3; W[h]++; } else if (hs < as) { P[a] += 3; W[a]++; } else { P[h]++; P[a]++; }
     };
-    for (const [h, a, hs, as, lh, la] of live) play(h, a, hs + poisson(lh, rand), as + poisson(la, rand));
-    for (const [h, a, lh, la] of left) play(h, a, poisson(lh, rand), poisson(la, rand));
+    for (const [h, a, hs, as, lh, la] of live) play(h, a, hs + poisson(lh * ea[h] * ed[a], rand), as + poisson(la * ea[a] * ed[h], rand));
+    for (const [h, a, lh, la] of left) play(h, a, poisson(lh * ea[h] * ed[a], rand), poisson(la * ea[a] * ed[h], rand));
     for (let i = 0; i < n; i++) jitter[i] = rand();
     order.sort((x, y) => P[y] - P[x] || W[y] - W[x] || D[y] - D[x] || F[y] - F[x] || jitter[y] - jitter[x]);
     for (let p = 0; p < n; p++) posCount[order[p] * n + p]++;
@@ -280,10 +363,10 @@ const OUTCOMES = [(h, a) => (h > a ? [h, a] : [1, 0]), (h, a) => (h === a ? [h, 
  * teamIds: o time do torcedor e os rivais.
  * Devolve {runs, teams: {id: {base: {title, g, z}, games: [{id, title: [m, e, v], g: [...], z: [...]}]}}} ou null.
  */
-export function secador({ finished, events, targets, teamIds, zones, runs = 4000, seed = 11 }) {
-  const prep = prepare({ finished, events });
+export function secador({ finished, events, targets, teamIds, zones, runs = 4000, seed = 11, prior = null }) {
+  const prep = prepare({ finished, events, prior });
   if (!prep) return null;
-  const { n, idx, pts, w, gd, gf, live, left } = prep;
+  const { n, idx, pts, w, gd, gf, live, left, spread } = prep;
   const ids = teamIds.filter((id, i) => idx.has(id) && teamIds.indexOf(id) === i);
   if (!ids.length) return null;
   const who = ids.map((id) => idx.get(id));
@@ -310,6 +393,8 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
   const D = new Float64Array(n);
   const F = new Float64Array(n);
   const J = new Float64Array(n);
+  const ea = new Float64Array(n);
+  const ed = new Float64Array(n);
   const liveRes = new Int32Array(live.length * 2);
   const leftRes = new Int32Array(left.length * 2);
   const T = ids.length;
@@ -339,15 +424,16 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
   };
   for (let s = 0; s < runs; s++) {
     P.set(pts); W.set(w); D.set(gd); F.set(gf);
+    jolt(ea, ed, spread, rand);
     live.forEach(([h, a, hs, as, lh, la], k) => {
-      const x = hs + poisson(lh, rand);
-      const y = as + poisson(la, rand);
+      const x = hs + poisson(lh * ea[h] * ed[a], rand);
+      const y = as + poisson(la * ea[a] * ed[h], rand);
       liveRes[2 * k] = x; liveRes[2 * k + 1] = y;
       add(h, a, x, y, 1);
     });
     left.forEach(([h, a, lh, la], k) => {
-      const x = poisson(lh, rand);
-      const y = poisson(la, rand);
+      const x = poisson(lh * ea[h] * ed[a], rand);
+      const y = poisson(la * ea[a] * ed[h], rand);
       leftRes[2 * k] = x; leftRes[2 * k + 1] = y;
       add(h, a, x, y, 1);
     });

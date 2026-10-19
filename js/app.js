@@ -2,7 +2,7 @@ import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
-import { chances, matchPicks, model, secador, suggestScore } from './sim.js';
+import { chances, matchPicks, model, priorFrom, secador, suggestScore } from './sim.js';
 import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import { coachFits, fetchCoaches } from './coach.js';
@@ -34,6 +34,8 @@ const COACH_KEY = 'tecnicos:v1';
 const COACH_MS = 12 * HOUR;          // técnico conhecido vale por meio dia
 const COACH_RETRY_MS = 10 * 60e3;   // sem resposta das fontes, tenta de novo depois disso
 const LINEUP_MS = 2 * 60e3;         // perto do jogo, sem escalação ainda: busca o resumo de novo
+const PRIOR_KEY = 'forca-anterior:v1';
+const PRIOR_RETRY_MS = 30 * 60e3;   // sem a temporada anterior, tenta de novo depois disso
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -85,6 +87,9 @@ const state = {
   summaries: new Map(),
   coaches: store(COACH_KEY, {}), // id do time -> {c: técnico ou null, t}
   coachTry: {},
+  prior: priorCached(new Date().getFullYear() - 1), // força de cada time no fim da temporada anterior
+  priorTry: 0,
+  priorLoading: false,
   lastStandings: 0,
   lastOk: 0,
   lastCache: 0,
@@ -104,8 +109,16 @@ const state = {
   selectedBar: null,
   scrollTo: null,
   open: {},               // blocos recolhíveis abertos (sobrevivem às atualizações da tela)
-  diag: { season: null, standings: null, refresh: null, summary: null, cache: null, errors: [] },
+  diag: { season: null, standings: null, refresh: null, summary: null, cache: null, prior: null, errors: [] },
 };
+
+// Força de partida guardada no celular: a temporada passada não muda mais, então vale o ano inteiro.
+function priorCached(year) {
+  const c = store(PRIOR_KEY, null);
+  if (c?.year !== year || !Array.isArray(c.teams)) return null;
+  const ok = c.teams.filter((t) => Array.isArray(t) && typeof t[0] === 'string' && t[1] > 0 && t[2] > 0);
+  return ok.length >= 4 ? new Map(ok.map(([id, att, def]) => [id, { att, def }])) : null;
+}
 
 function cleanSims(raw) {
   const out = {};
@@ -235,6 +248,7 @@ async function loadSeason() {
   } finally {
     state.seasonLoading = false;
     refresh();
+    maybePrior();
   }
 }
 
@@ -363,6 +377,35 @@ function loadCache() {
   return state.events.size > 0;
 }
 
+/**
+ * Força de cada time no fim da temporada anterior, ponto de partida do modelo das chances e dos palpites
+ * (quem subiu começa na força média dos que sobem). Uma leitura por ano, depois da temporada atual.
+ */
+// Com a temporada atual já carregada, busca a anterior (se ainda não tem e não tentou há pouco).
+function maybePrior() {
+  if (!state.prior && !state.priorLoading && state.seasonOk && Date.now() - state.priorTry > PRIOR_RETRY_MS) loadPrior();
+}
+
+async function loadPrior() {
+  const year = new Date().getFullYear() - 1;
+  state.priorTry = Date.now();
+  state.priorLoading = true;
+  try {
+    const res = await espn.fetchSeason(year);
+    const prior = res.failed.length ? null : priorFrom(res.events.map(espn.parseEvent));
+    state.diag.prior = { t: Date.now(), year, count: res.events.length, failed: res.failed, teams: prior?.size || 0 };
+    if (prior) {
+      state.prior = prior;
+      save(PRIOR_KEY, { year, teams: [...prior].map(([id, p]) => [id, +p.att.toFixed(4), +p.def.toFixed(4)]) });
+      refresh();
+    }
+  } catch (err) {
+    state.diag.prior = { t: Date.now(), year, error: errText(err) };
+  } finally {
+    state.priorLoading = false;
+  }
+}
+
 async function tick({ warm = false } = {}) {
   clearTimeout(state.timer);
   if (state.loading) return;
@@ -370,6 +413,7 @@ async function tick({ warm = false } = {}) {
   el.refresh.classList.add('loading');
   const now = Date.now();
   if (seasonDue(now)) loadSeason();
+  else maybePrior();
   try {
     const r = await refreshHot(warm || now - state.lastWarm > WARM_MS);
     state.failed = false;
@@ -452,12 +496,12 @@ try {
   worker.onerror = () => { worker = null; pendingOdds.forEach((done) => done(undefined)); pendingOdds.clear(); };
 } catch { worker = null; }
 
-// A data entra como número: o modelo ordena os jogos por ela para achar a fase recente de cada time.
+// A data entra como número (no modelo, jogo antigo pesa menos), com os chutes no gol de cada time.
 const compactEvent = (e) => ({
   id: e.id,
   date: e.date.getTime(),
-  home: { id: e.home.id, score: e.home.score },
-  away: { id: e.away.id, score: e.away.score },
+  home: { id: e.home.id, score: e.home.score, sot: e.home.stats?.shotsOnTarget ?? null },
+  away: { id: e.away.id, score: e.away.score, sot: e.away.stats?.shotsOnTarget ?? null },
   status: { kind: e.status.kind, label: e.status.label, half: !!e.status.half },
 });
 
@@ -472,12 +516,14 @@ function inWorker(input, local) {
 }
 
 function runOdds(finished, events, overrides) {
-  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS };
+  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS, prior: priorList() };
   return inWorker(input, () => {
-    const out = chances({ ...input, finished });
+    const out = chances({ ...input, finished, prior: state.prior });
     return out ? { byId: [...out.byId], runs: out.runs, left: out.left } : null;
   });
 }
+
+const priorList = () => (state.prior ? [...state.prior] : null);
 
 let oddsToken = 0;
 const asOdds = (r) => (r ? { byId: new Map(r.byId), runs: r.runs, left: r.left } : null);
@@ -488,7 +534,7 @@ function scheduleOdds(delay = 30) {
   const list = eventList();
   const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
   const done = list.filter((e) => e.status.kind === 'post').length;
-  const baseSig = `${done}|${live}|${state.zones.g}|${state.zones.zStart}`;
+  const baseSig = `${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}`;
   const sig = `${baseSig}|${JSON.stringify(state.sims)}`;
   if (sig === state.oddsSig) return;
   clearTimeout(state.oddsTimer);
@@ -527,16 +573,16 @@ function scheduleSecador() {
   const list = eventList();
   const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
   const done = list.filter((e) => e.status.kind === 'post').length;
-  const sig = `${r.number}|${teamIds.join(',')}|${done}|${live}|${state.zones.g}|${state.zones.zStart}`;
+  const sig = `${r.number}|${teamIds.join(',')}|${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}`;
   if (sig === state.secadorSig) return;
   state.secadorSig = sig;
   const token = ++secadorToken;
   const round = r.number;
   const input = {
     kind: 'secador', finished: [...t.finished.values()], events: list.map(compactEvent), zones: { g: state.zones.g, zStart: state.zones.zStart },
-    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamIds, runs: SECADOR_RUNS,
+    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamIds, runs: SECADOR_RUNS, prior: priorList(),
   };
-  const local = () => secador({ ...input, finished: t.finished });
+  const local = () => secador({ ...input, finished: t.finished, prior: state.prior });
   // Um worker antigo (do cache do navegador) responderia em outro formato: confere antes de usar.
   inWorker(input, local)
     .then((res) => (res === null || res?.teams?.[team.id] ? res : local()))
@@ -846,9 +892,9 @@ function seasonAverage() {
   return games >= 40 ? goals / (games / 2) : null;
 }
 
-// Modelo de força dos times com os jogos encerrados até agora.
+// Modelo de força dos times com os jogos encerrados até agora (e a temporada anterior, quando já veio).
 function currentModel() {
-  return model(state.table?.finished || new Map(), eventList());
+  return model(state.table?.finished || new Map(), eventList(), state.prior);
 }
 
 function renderStats() {
@@ -952,7 +998,7 @@ function renderSheet() {
     html = ui.diagSheet({
       ...state.diag, events: state.events.size, rounds: state.rounds.length, roundsMethod: state.rounds.method, roundsWhy: state.rounds.why,
       focus: roundName(focusRound()), complete: state.complete, seasonComplete: state.seasonComplete, mode: state.table?.mode || null,
-      odds: !!state.oddsBase, check: state.check, adjust: state.adjust, names: new Map(allTeams().map((t) => [t.id, t.name])),
+      odds: !!state.oddsBase, priorTeams: state.prior?.size || 0, check: state.check, adjust: state.adjust, names: new Map(allTeams().map((t) => [t.id, t.name])),
       ua: navigator.userAgent, modal: hasModal,
     });
   }

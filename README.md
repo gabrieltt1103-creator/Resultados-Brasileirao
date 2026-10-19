@@ -52,10 +52,15 @@ Micro app para acompanhar no celular a rodada do Brasileirão Série A em tempo 
 - Os jogos já encerrados da rodada ficam numa lista recolhida, com o resultado real.
 
 **Como o modelo funciona**
-- Força de ataque e de defesa de cada time pelos gols marcados e sofridos, misturando três janelas: últimos 5 jogos (40%), últimos 10 (35%) e a temporada (25%). Cada janela recebe 8 jogos "fictícios" na média do campeonato, para poucos jogos não pesarem demais.
+- Força de ataque e de defesa de cada time por um ajuste de Poisson (Maher, Dixon-Coles): os gols de cada jogo descontam a força do adversário (2 gols no líder valem mais que 2 no lanterna) e entram misturados com os chutes no gol daquele jogo (75% gols, 25% chutes no gol convertidos em gols pela média do campeonato), que oscilam menos que os gols. Jogos antigos pesam menos (meia-vida de 240 dias).
+- Ponto de partida: a força de cada time no fim do Brasileirão anterior, puxada para a média (expoente 0,8), valendo como 20 jogos; quem subiu começa na força média dos que subiram de 2015 a 2026 (ataque 0,89, defesa 1,10). A temporada anterior vem da ESPN uma vez por ano e fica salva no celular; sem ela, o ponto de partida é a média do campeonato, valendo como 10 jogos. O "Status dos dados" mostra se ela veio.
 - Vantagem de jogar em casa medida na própria temporada.
 - Gols esperados = média do campeonato × ataque × defesa do adversário × fator casa/fora; placares pela distribuição de Poisson.
-- Pesos escolhidos testando na temporada 2026: prevendo cada jogo só com os anteriores, a mistura errou menos que a média da temporada (log-loss 1,036 contra 1,042) e que só o mando de campo (1,061). A sugestão acertou o resultado em 48% dos jogos e o placar exato em 15%.
+- Nas chances até o fim (e no secador), cada campeonato sorteado varia um pouco a força de cada time (desvio de 0,02 + 0,15 × √(fração do campeonato que falta) no log do ataque e da defesa): a força medida tem erro e muda até o fim (técnico, lesões, reforços).
+- Tudo escolhido num teste retroativo com os Brasileirões de 2015 a 2026, prevendo cada jogo e cada fim de campeonato só com o que se sabia antes:
+  - Jogo a jogo (RPS do 1X2, menor é melhor; 4.364 jogos): do 10º ao 100º jogo da temporada, 0,2155 com o modelo antigo (janelas de 5, 10 e todos os jogos) e 0,2080 com o novo; do 100º ao 250º, 0,2102 → 0,2076; do 250º em diante, 0,2103 → 0,2077. Chutar só o mando de campo dá 0,217 a 0,221.
+  - Fim do campeonato (Brier x100, 11 temporadas, da 4ª à 36ª rodada): título 2,48 → 2,21, G6 9,03 → 8,20, Z4 8,93 → 8,14 (cerca de 10% a menos de erro). O modelo antigo era confiante demais: o que ele dava como menos de 2% (0,2% em média) acontecia 1% das vezes, e o que dava entre 70% e 90% (80% em média) acontecia 68% das vezes; no novo, 0,3% e 78%.
+  - Não ajudaram: correção de empates de Dixon-Coles (o Poisson já prevê 26% de empates, e há 26–27%) e chutes para fora. As cotações das casas de aposta não ficam guardadas na ESPN para os jogos antigos, então não dá para testar.
 
 **Números**
 - Gols da rodada, média por jogo (comparada com a média do campeonato até aqui), empates, cartões, quem venceu mais (mandante ou visitante), em que minutos saem os gols, artilheiros da rodada e maior goleada.
@@ -124,7 +129,7 @@ Não há build nem dependências: os módulos em `js/` rodam direto no navegador
 | `js/rounds.js` | Monta as rodadas completas (inclusive jogos remarcados) e numera cada uma |
 | `js/table.js` | Tabela ao vivo, conferência com a classificação oficial, zonas, últimos 5 jogos, cenários e distâncias |
 | `js/insights.js` | Histórias dos jogos, manchetes da rodada, impacto da simulação, números e as frases de resumo |
-| `js/sim.js`, `js/odds-worker.js` | Chances até o fim (Monte Carlo), contas do secador e sorteio de placares |
+| `js/sim.js`, `js/odds-worker.js` | Força dos times (ajuste de Poisson com a temporada anterior), chances até o fim (Monte Carlo), contas do secador e sorteio de placares |
 | `js/secador.js` | Secador: rivais por estado, objetivo do time, para quem torcer em cada jogo e as frases |
 | `js/fx.js` | Som de gol, vibração e confete |
 | `js/ui.js` | Monta o HTML de cada parte da tela (versão atual) |

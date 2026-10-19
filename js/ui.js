@@ -853,8 +853,8 @@ function doneList(events, open) {
 
 const HOW = `<details class="how" data-keep="how-odds"%OPEN%>
   <summary>Como calculamos</summary>
-  <p>Cada time tem uma força de ataque e uma de defesa, medidas pelos gols marcados e sofridos. A fase recente pesa mais: os últimos 5 jogos contam 40%, os últimos 10 contam 35% e o campeonato inteiro, 25%. Quem joga em casa ganha a vantagem que os mandantes têm tido neste Brasileirão.</p>
-  <p>Com essas forças, o app sorteia o placar de cada jogo que falta, refaz o campeonato 3.000 vezes e conta em quantas cada time termina campeão, no %G% ou no %Z%.</p>
+  <p>Cada time tem uma força de ataque e uma de defesa, medidas pelos gols e pelos chutes no gol, descontando a força de quem ele enfrentou: fazer 2 gols no líder vale mais que no lanterna. Jogos antigos pesam menos, e a força do time no fim do Brasileirão passado é o ponto de partida (quem subiu começa como costumam começar os que sobem). Quem joga em casa ganha a vantagem que os mandantes têm tido neste Brasileirão.</p>
+  <p>Com essas forças, o app sorteia o placar de cada jogo que falta, refaz o campeonato 3.000 vezes e conta em quantas cada time termina campeão, no %G% ou no %Z%. Em cada uma, a força dos times varia um pouco (mais quando falta muito campeonato), porque ela pode mudar até o fim. Testado nos Brasileirões de 2015 a 2025, prevendo cada rodada só com o que se sabia antes.</p>
 </details>`;
 
 /**
@@ -935,6 +935,10 @@ export function diagSheet(d) {
       : d.roundsMethod === 'espelho' ? `${d.rounds} montadas pelo espelho turno/returno, com os jogos remarcados na rodada certa; atual: ${d.focus}`
         : `${d.rounds} montadas pelas datas (${d.roundsWhy}); jogos remarcados podem ficar fora da rodada; atual: ${d.focus}`),
     row(d.mode === 'jogos' ? d.odds || null : false, 'Chances até o fim', d.mode !== 'jogos' ? 'precisa de todos os jogos da temporada' : d.odds ? 'calculadas' : 'calculando'),
+    row(d.priorTeams ? true : d.prior?.error || d.prior?.failed?.length ? false : null, 'Temporada anterior (ponto de partida das chances)', d.priorTeams
+      ? `força de ${d.priorTeams} times${d.prior ? ` às ${hhmm(d.prior.t)}` : ', salva no celular'}`
+      : d.prior?.error ? `falhou às ${hhmm(d.prior.t)}: ${d.prior.error}; as chances usam só esta temporada`
+        : d.prior ? `não veio inteira às ${hhmm(d.prior.t)}; as chances usam só esta temporada` : 'aguardando'),
     row(d.summary ? d.summary.ok : null, 'Estatísticas do jogo', !d.summary ? 'abra um jogo encerrado ou ao vivo para testar' : d.summary.ok ? `ok às ${hhmm(d.summary.t)}` : `falhou: ${d.summary.error}`),
     row(r ? r.ok && !r.errors?.length : null, 'Placar ao vivo (dia a dia)', refreshText),
   ];

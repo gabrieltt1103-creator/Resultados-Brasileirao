@@ -30,10 +30,12 @@ const PHASES = {
   'knockout-round-playoffs': 'Playoffs', 'round-of-16': 'Oitavas de final', quarterfinals: 'Quartas de final',
   semifinals: 'Semifinal', final: 'Final', finals: 'Final',
   'taca-guanabara': 'Taça Guanabara', 'relegation-stage': 'Rebaixamento', 'gaucho---relegation': 'Rebaixamento',
+  'temporada-regular': 'Primeira fase', 'carioca-championship---semifinals': 'Semifinal', 'carioca-championship---final': 'Final',
 };
 const WORDS = {
   'taca-guanabara': 'Taça Guanabara', 'taca-rio': 'Taça Rio', 'trofeu-inconfidencia': 'Troféu Inconfidência', playoffs: 'Mata-mata',
   farroupilha: 'Farroupilha', quarterfinals: 'quartas', semifinals: 'semifinal', finals: 'final', final: 'final',
+  'carioca-championship': 'Final do Carioca', 'temporada-regular': 'Primeira fase',
 };
 
 /** "taca-rio---semifinals" -> "Taça Rio · semifinal"; jogo único (Supercopa, Recopa) -> "Final". */
@@ -47,7 +49,7 @@ export function phaseLabel(slug, comp = null) {
 
 // Mata-mata: fase de confrontos (ida e volta ou jogo único). Grupos e pontos corridos não.
 const KNOCKOUT = /round-of-16|quarterfinals|semifinals|final|playoffs|first-round|second-round|third-round|fourth-round|fifth-round|first-stage|second-stage|third-stage/;
-export const isKnockout = (slug, comp = null) => comp?.kind === 'unico' || (KNOCKOUT.test(slug || '') && !/regular|league|group|relegation|taca-guanabara$/.test(slug || ''));
+export const isKnockout = (slug, comp = null) => comp?.kind === 'unico' || (KNOCKOUT.test(slug || '') && !/regular|league|group|relegation|taca-guanabara$/.test(slug || '') && !(comp?.kind === 'estadual' && /^(first|second)-round$/.test(slug || '')));
 
 /** Fases em ordem de data: [{slug, label, events, first, last, knockout}]. */
 export function phasesOf(events, comp = null) {
@@ -130,6 +132,76 @@ export function tiesOf(events) {
       tbd: !!(a.tbd || b.tbd),
     };
   });
+}
+
+/**
+ * Formato dos estaduais, ano a ano (lido nos jogos e na tabela da ESPN; cada ano precisa ser conferido).
+ * first: a primeira fase (identificador da ESPN, times, grupos, quantos caem ou o quadrangular do rebaixamento);
+ * bracket: as fases do mata-mata, com o cruzamento da primeira (posição na fase, "A1" = 1º do grupo A) e das
+ * seguintes ('adjacent': chave fixa; 'reseed': melhor campanha contra a pior). O mais bem colocado joga em casa
+ * (no jogo único) ou decide em casa (ida e volta); a final do Carioca de 2026 foi em campo neutro.
+ */
+const PAULISTA_GRUPOS = {
+  first: { slug: 'temporada-regular', teams: 16, groups: 4, relegate: 2 },
+  bracket: [
+    { slug: 'quarterfinals', legs: 1, pairs: [['A1', 'A2'], ['B1', 'B2'], ['C1', 'C2'], ['D1', 'D2']] },
+    { slug: 'semifinals', legs: 1, pairing: 'reseed' },
+    { slug: 'finals', legs: 2 },
+  ],
+};
+const CARIOCA_TABELA = {
+  first: { slug: 'taca-guanabara', teams: 12, relegate: 1 },
+  bracket: [
+    { slug: 'carioca-championship---semifinals', legs: 2, pairs: [[1, 4], [2, 3]] },
+    { slug: 'carioca-championship---final', legs: 2 },
+  ],
+};
+export const FORMATS = {
+  'bra.camp.paulista': {
+    2020: PAULISTA_GRUPOS, 2021: PAULISTA_GRUPOS, 2022: PAULISTA_GRUPOS, 2023: PAULISTA_GRUPOS, 2024: PAULISTA_GRUPOS, 2025: PAULISTA_GRUPOS,
+    2026: {
+      first: { slug: 'league-phase', teams: 16, relegate: 2 },
+      bracket: [
+        { slug: 'quarterfinals', legs: 1, pairs: [[1, 8], [4, 5], [2, 7], [3, 6]] },
+        { slug: 'semifinals', legs: 1, pairing: 'adjacent' },
+        { slug: 'finals', legs: 2 },
+      ],
+    },
+  },
+  'bra.camp.carioca': {
+    2022: CARIOCA_TABELA, 2023: CARIOCA_TABELA, 2024: CARIOCA_TABELA, 2025: CARIOCA_TABELA,
+    2026: {
+      first: { slug: 'taca-guanabara', teams: 12, groups: 2, relegationStage: { slug: 'relegation-stage', seeds: ['A5', 'A6', 'B5', 'B6'], relegate: 1 } },
+      bracket: [
+        { slug: 'taca-guanabara---quarterfinals', legs: 1, pairs: [['A1', 'A4'], ['A2', 'A3'], ['B1', 'B4'], ['B2', 'B3']] },
+        { slug: 'taca-guanabara---semifinals', legs: 2, pairing: 'adjacent' },
+        { slug: 'taca-guanabara---final', legs: 1, neutral: true },
+      ],
+    },
+  },
+};
+
+/**
+ * Formatos a tentar num ano: o do próprio ano e, se ainda não foi conferido, os anteriores (do mais novo para
+ * o mais velho). Quem usa confere se os jogos batem com o formato (formatFits) antes de calcular.
+ */
+export function formatsFor(slug, year) {
+  const all = FORMATS[slug];
+  if (!all) return [];
+  if (all[year]) return [{ year, format: all[year] }];
+  return Object.keys(all).map(Number).filter((y) => y < year).sort((a, b) => b - a).map((y) => ({ year: y, format: all[y] }));
+}
+
+// Ponto de partida da força de quem não é da Série A, por estadual (testado de 2017 a 2026).
+export const SMALL = { 'bra.camp.paulista': { att: 0.7, def: 1.35 }, 'bra.camp.carioca': { att: 0.6, def: 1.5 } };
+
+/**
+ * Sem o registro antigo de jogo remarcado: a ESPN às vezes mantém, "a jogar" e com a data antiga, o mesmo
+ * jogo (mesma fase, mesmo mandante e visitante) que depois foi jogado em outra data.
+ */
+export function dropStale(events, now = Date.now()) {
+  const played = new Set(events.filter((e) => e.status.kind === 'post' || e.status.kind === 'live').map((e) => `${e.phase}|${e.home.id}|${e.away.id}`));
+  return events.filter((e) => !(e.status.kind === 'pre' && now - e.date > 6 * 36e5 && played.has(`${e.phase}|${e.home.id}|${e.away.id}`)));
 }
 
 /** Times de um jogo que são clubes da Série A (ids). */

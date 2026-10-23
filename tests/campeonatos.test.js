@@ -3,8 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseEvent } from '../campeonatos/js/espn.js';
-import { compOf, phaseLabel, phasesOf, pickPhase, tiesOf } from '../campeonatos/js/comps.js';
+import { FORMATS, compOf, dropStale, formatsFor, phaseLabel, phasesOf, pickPhase, tiesOf } from '../campeonatos/js/comps.js';
 import { knockoutOdds, openPhase } from '../campeonatos/js/knockout.js';
+import { formatFits, stateOdds } from '../campeonatos/js/estadual.js';
 
 // Quartas, semifinais e final da Libertadores e da Copa do Brasil 2026 (ESPN, 23/10/2026 à noite).
 const copas = JSON.parse(fs.readFileSync(new URL('./data/copas-2026.json', import.meta.url)));
@@ -81,4 +82,59 @@ test('o app novo guarda tudo com prefixo próprio e não mexe nos dados do app d
   assert.equal(data.get('meu-time'), '"819"');
   assert.equal(data.get('camp:meu-time'), '"2029"');
   delete globalThis.localStorage;
+});
+
+// Paulista e Carioca 2026 completos (ESPN), com os grupos do Carioca.
+const est = JSON.parse(fs.readFileSync(new URL('./data/estaduais-2026.json', import.meta.url)));
+const paulista = est.paulista.map(parseEvent);
+const carioca = est.carioca.map(parseEvent);
+const gruposCarioca = new Map(Object.entries(est.gruposCarioca));
+// "Como estava" numa data: jogos depois dela voltam a ser "a jogar"; as fases seguintes ainda não existem.
+const asOf = (events, slug, iso) => events.filter((e) => e.phase === slug).map((e) => (e.date <= new Date(iso) ? e
+  : { ...e, status: { kind: 'pre', label: '' }, home: { ...e.home, score: null, pens: null }, away: { ...e.away, score: null, pens: null } }));
+const sum = (res, key) => [...res.byTeam.values()].reduce((s, v) => s + v[key], 0);
+const named = (events) => new Map(events.flatMap((e) => [[e.home.id, e.home.name], [e.away.id, e.away.name]]));
+
+test('estaduais: formato do ano, classificação, rebaixamento e título', () => {
+  const pf = FORMATS['bra.camp.paulista'][2026];
+  const cf = FORMATS['bra.camp.carioca'][2026];
+  assert.ok(formatFits(pf, paulista, null));
+  assert.ok(formatFits(cf, carioca, gruposCarioca));
+  assert.ok(!formatFits(cf, carioca, null)); // sem os grupos, o formato do Carioca não fecha
+  assert.ok(!formatFits(FORMATS['bra.camp.paulista'][2025], paulista, null)); // 2026 mudou: fase de liga
+  // Ano ainda não conferido: tenta o formato mais novo primeiro.
+  assert.equal(formatsFor('bra.camp.paulista', 2027)[0].year, 2026);
+  const flat = () => [1.3, 1.1];
+  // Primeira fase encerrada: os classificados e os rebaixados são os de verdade.
+  const names = named(paulista);
+  const done = stateOdds({ events: paulista, format: pf, lambda: flat, runs: 300 });
+  const quartas = new Set(paulista.filter((e) => e.phase === 'quarterfinals').flatMap((e) => [e.home.id, e.away.id]));
+  for (const [id, v] of done.byTeam) assert.equal(v.qualify, quartas.has(id) ? 1 : 0, names.get(id));
+  assert.deepEqual([...done.byTeam].filter(([, v]) => v.relegate === 1).map(([id]) => names.get(id)).sort(), ['Ponte Preta', 'Velo Clube']);
+  // Campeão: o Palmeiras, já com a final jogada.
+  assert.equal(done.byTeam.get('2029').title, 1);
+  // No meio da primeira fase: 8 vagas, 2 rebaixados e 1 campeão no total.
+  const mid = stateOdds({ events: asOf(paulista, 'league-phase', '2026-01-30T23:59:00-03:00'), format: pf, lambda: flat, runs: 2000 });
+  assert.ok(mid.firstLeft > 0);
+  assert.ok(Math.abs(sum(mid, 'qualify') - 8) < 1e-9 && Math.abs(sum(mid, 'relegate') - 2) < 1e-9 && Math.abs(sum(mid, 'title') - 1) < 1e-9);
+  // Carioca: 4 de cada grupo no mata-mata; o rebaixamento sai do quadrangular dos 5º e 6º colocados.
+  const cmid = stateOdds({ events: asOf(carioca, 'taca-guanabara', '2026-01-28T23:59:00-03:00'), format: cf, groups: gruposCarioca, lambda: flat, runs: 2000 });
+  assert.ok(Math.abs(sum(cmid, 'qualify') - 8) < 1e-9 && Math.abs(sum(cmid, 'relegate') - 1) < 1e-9);
+  const cdone = stateOdds({ events: carioca, format: cf, groups: gruposCarioca, lambda: flat, runs: 300 });
+  const cn = named(carioca);
+  assert.deepEqual([...cdone.byTeam].filter(([, v]) => v.relegate === 1).map(([id]) => cn.get(id)), ['Maricá']);
+  assert.equal(cdone.byTeam.get('819').title, 1); // Flamengo, campeão nos pênaltis
+  // Antes das semifinais, chance de chegar a cada fase: só os 4 que seguem vivos.
+  const semis = carioca.filter((e) => !/taca-guanabara---(semifinals|final)|taca-rio---final/.test(e.phase) || e.date < new Date('2026-02-21'));
+  const ko = stateOdds({ events: semis, format: cf, groups: gruposCarioca, lambda: flat, runs: 2000 });
+  assert.deepEqual([...ko.reach[1]].filter(([, p]) => p > 0).length, 4);
+});
+
+test('registro antigo de jogo remarcado sai da lista', () => {
+  const now = Date.parse('2026-03-20T12:00:00Z');
+  const base = paulista.find((e) => e.phase === 'league-phase');
+  const stale = { ...base, id: 'velho', date: new Date(+base.date - 3 * 864e5), status: { kind: 'pre', label: '' } };
+  assert.deepEqual(dropStale([base, stale], now).map((e) => e.id), [base.id]);
+  // Jogo a jogar sem outro registro jogado continua.
+  assert.equal(dropStale([stale], now).length, 1);
 });

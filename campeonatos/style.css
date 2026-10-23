@@ -1461,3 +1461,14 @@ details[open] > summary::before { transform: rotate(45deg); }
 .more-block > summary { cursor: pointer; font-weight: 600; color: var(--accent); }
 .more-block[open] > summary { margin-bottom: 10px; }
 .more-block .tie + .tie { margin-top: 12px; }
+
+/* Chances no estadual: cabe em 320 px sem rolar para o lado */
+.state-odds { font-size: 13.5px; }
+.state-odds .club { position: static; box-shadow: none; padding-left: 8px; }
+.state-odds th, .state-odds td { padding-inline: 4px; }
+.state-odds th:not(.club) { white-space: normal; line-height: 1.15; font-size: 12px; }
+.state-odds td:not(.club) { font-variant-numeric: tabular-nums; }
+.state-odds .club-name { max-width: 120px; }
+@media (max-width: 360px) { .state-odds .club-name { max-width: 92px; } .state-odds .club-cell { gap: 5px; } }
+.state-odds .so-good { font-weight: 700; color: var(--good); }
+.state-odds .so-bad { font-weight: 700; color: var(--live); }

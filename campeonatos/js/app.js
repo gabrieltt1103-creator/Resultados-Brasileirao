@@ -3,8 +3,9 @@ import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName,
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { PROMOTED, chances, expectedGoals, matchPicks, model, priorFrom, secador, suggestScore } from './sim.js';
-import { COMPS, CUPS, compByKey, compOf, involves, phaseLabel, phasesOf, pickPhase, tiesOf } from './comps.js';
-import { knockoutOdds } from './knockout.js';
+import { COMPS, CUPS, SMALL, compByKey, compOf, dropStale, formatsFor, involves, phaseLabel, phasesOf, pickPhase, tiesOf } from './comps.js';
+import { knockoutOdds, openPhase } from './knockout.js';
+import { formatFits, stateOdds } from './estadual.js';
 import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import { coachFits, fetchCoaches } from './coach.js';
@@ -39,6 +40,8 @@ const PRIOR_RETRY_MS = 30 * 60e3;   // sem a temporada anterior, tenta de novo d
 const COMP_KEY = 'competicao';
 const CUP_KEY = (slug) => `copa:${slug}:v1`;
 const CONT_KEY = 'continental-anterior:v1';
+const EST_KEY = (slug) => `estadual-anterior:${slug}:v1`;
+const EST_RUNS = 5000;
 const CUP_MS = 30 * 60e3;           // competição com jogo nos próximos dias: temporada de novo depois disso
 const CUP_IDLE_MS = 12 * HOUR;      // sem jogo por perto
 const GROUPS_MS = 5 * 60e3;
@@ -129,6 +132,8 @@ const state = {
   day: 0,                 // em Hoje: dias a partir de hoje
   contPast: null,         // jogos da Libertadores e da Sul-Americana do ano anterior (força dos estrangeiros)
   contTry: 0,
+  estPast: {},            // estadual -> jogos do ano anterior (força dos times pequenos)
+  estTry: {},
   cupOdds: new Map(),     // competição -> {sig, res}
 };
 
@@ -475,13 +480,15 @@ function schedule() {
 // Cada competição tem os seus jogos (a temporada inteira, numa chamada só, de 85 a 130 KB), guardados no
 // celular, e é atualizada dia a dia quando tem jogo rolando, como o Brasileirão.
 const cupOf = (slug) => (state.cups[slug] ||= { events: new Map(), phases: [], phaseIdx: -1, pinned: null, t: 0, tried: 0, ok: false, loading: false, groups: null, groupsT: 0 });
-const cupEvents = (slug) => [...(state.cups[slug]?.events.values() || [])];
+const cupEvents = (slug) => dropStale([...(state.cups[slug]?.events.values() || [])]);
 // Todos os jogos de todas as competições (o Brasileirão primeiro).
 const allEvents = () => [...eventList(), ...CUPS.flatMap((c) => cupEvents(c.slug))];
-// Clubes da Série A deste ano (pelos jogos do Brasileirão).
+// Clubes da Série A deste ano (pelos jogos do Brasileirão). No começo do ano, antes de a ESPN ter os jogos
+// do novo Brasileirão (época dos estaduais), valem os da temporada anterior.
 function serieA() {
   const ids = new Set();
   for (const e of state.events.values()) { ids.add(e.home.id); ids.add(e.away.id); }
+  if (ids.size < 20 && state.prior) for (const id of state.prior.keys()) ids.add(id);
   return ids;
 }
 
@@ -696,7 +703,9 @@ const lambdaOf = (m) => (h, a, neutral) => {
  * estrangeiros (partindo de ataque 0,8 e defesa 1,2, abaixo da média brasileira).
  */
 let contMemo = { key: '', m: null };
+const estMemo = {};
 function cupModel(slug) {
+  if (compOf(slug)?.kind === 'estadual') return estModel(slug);
   if (!state.table) return null;
   if (compOf(slug)?.kind !== 'continental') return currentModel();
   if (!state.contPast) return null;
@@ -711,18 +720,111 @@ function cupModel(slug) {
   return contMemo.m;
 }
 
+// Jogos do estadual do ano anterior: dão força aos times pequenos (lidos uma vez por ano, guardados no celular).
+function estPastOf(slug) {
+  if (state.estPast[slug] !== undefined) return state.estPast[slug];
+  const year = new Date().getFullYear() - 1;
+  const c = store(EST_KEY(slug), null);
+  state.estPast[slug] = c?.year === year && Array.isArray(c.events) ? c.events.map((e) => ({ ...e, date: new Date(e.date) })) : null;
+  if (!state.estPast[slug] && Date.now() - (state.estTry[slug] || 0) > PRIOR_RETRY_MS) loadEstPast(slug, year);
+  return state.estPast[slug];
+}
+
+async function loadEstPast(slug, year) {
+  state.estTry[slug] = Date.now();
+  try {
+    const json = await espn.fetchCompYear(slug, year);
+    const events = (json?.events || []).map((raw) => { try { return espn.parseEvent(raw); } catch { return null; } })
+      .filter((e) => e && e.status.kind === 'post' && e.home.score != null && e.away.score != null)
+      .map((e) => ({
+        id: e.id, date: e.date, status: { kind: 'post' },
+        home: { id: e.home.id, score: e.home.score, sot: e.home.stats?.shotsOnTarget ?? null },
+        away: { id: e.away.id, score: e.away.score, sot: e.away.stats?.shotsOnTarget ?? null },
+      }));
+    if (!events.length) return;
+    state.estPast[slug] = events;
+    save(EST_KEY(slug), { year, events: events.map((e) => ({ ...e, date: +e.date })) });
+    state.cupOdds.delete(slug);
+    if (state.comp === slug) render();
+  } catch { /* tenta de novo mais tarde */ }
+}
+
+/**
+ * Força no estadual: clubes da Série A pelo Brasileirão anterior; os outros partem bem abaixo (ponto de
+ * partida de cada estadual, testado de 2017 a 2026) e se ajustam pelos jogos do estadual deste ano e do anterior.
+ */
+function estModel(slug) {
+  const past = estPastOf(slug) || [];
+  const games = [...cupEvents(slug), ...past];
+  const key = `${games.filter((e) => e.status.kind === 'post').length}|${past.length}|${!!state.prior}`;
+  if (estMemo[slug]?.key === key) return estMemo[slug].m;
+  const ids = new Set(games.flatMap((e) => [e.home.id, e.away.id]));
+  const ours = serieA();
+  const prior = new Map([...ids].map((id) => [id, state.prior?.get(id) || (ours.has(id) ? (state.prior ? PROMOTED : { att: 1, def: 1 }) : SMALL[slug] || FOREIGN)]));
+  const m = model(new Map([...ids].map((id) => [id, { id }])), games.filter((e) => !e.home.tbd && !e.away.tbd), prior);
+  estMemo[slug] = { key, m };
+  return m;
+}
+
+// Grupos do estadual pela tabela da ESPN: Map id -> letra do grupo ("Grupo A" -> "A").
+function groupMap(slug) {
+  const c = state.cups[slug];
+  if (!c?.groups) return null;
+  const m = new Map();
+  for (const g of c.groups) {
+    const letter = /grupo\s+([a-z])\b/i.exec(g.name || '')?.[1]?.toUpperCase() || '';
+    for (const r of g.rows) m.set(r.id, letter);
+  }
+  return m;
+}
+
+/**
+ * Chances no estadual (Paulista, Carioca), no formato do ano. Devolve o mesmo formato das chances do
+ * mata-mata (fase em aberto, chance de passar em cada confronto) mais as da primeira fase (classificar, cair).
+ */
+function estadualOdds(slug, c) {
+  const events = cupEvents(slug);
+  const year = new Date().getFullYear();
+  const cands = formatsFor(slug, year);
+  if (!cands.length) return null;
+  if (cands.some((f) => f.format.first.groups) && !c.groups) loadGroups(slug);
+  const groups = groupMap(slug);
+  const pick = cands.find((f) => formatFits(f.format, events, groups));
+  if (!pick) return { kind: 'estadual', unknown: true, year };
+  const m = estModel(slug);
+  const est = stateOdds({ events, format: pick.format, groups, lambda: lambdaOf(m), runs: EST_RUNS, seed: 9 });
+  if (!est) return null;
+  const open = openPhase(c.phases);
+  const r = open ? pick.format.bracket.findIndex((b) => b.slug === c.phases[open.idx].slug) : -1;
+  const nextOf = (id) => (r + 1 < pick.format.bracket.length ? est.reach[r + 1].get(id) : est.byTeam.get(id)?.title) || 0;
+  const ties = r >= 0 ? open.ties.map((t) => {
+    const pa = nextOf(t.a.id);
+    const pb = nextOf(t.b.id);
+    const sum = pa + pb || 1;
+    return { key: t.key, a: t.a, b: t.b, done: t.done, p: { [t.a.id]: pa / sum, [t.b.id]: pb / sum } };
+  }) : [];
+  return {
+    kind: 'estadual', est, format: pick.format, formatYear: pick.year, year,
+    phase: r >= 0 ? c.phases[open.idx] : null, ties, runs: est.runs,
+    final: r === pick.format.bracket.length - 1,
+  };
+}
+
 // Chances do mata-mata da competição, refeitas só quando algum jogo muda.
 function cupOddsOf(slug) {
   const c = state.cups[slug];
   if (!c?.phases.length) return null;
   const sig = [cupEvents(slug).map((e) => `${e.id}:${e.status.kind}:${e.home.score}-${e.away.score}@${e.status.label}`).join(','),
-    eventList().filter((e) => e.status.kind === 'post').length, !!state.prior, !!state.contPast, !!state.table].join('|');
+    eventList().filter((e) => e.status.kind === 'post').length, !!state.prior, !!state.contPast, !!state.table, !!c.groups, state.estPast[slug]?.length || 0].join('|');
   const hit = state.cupOdds.get(slug);
   if (hit?.sig === sig) return hit.res;
   let res = null;
   try {
-    const m = cupModel(slug);
-    if (m) res = knockoutOdds({ phases: c.phases, comp: compOf(slug), lambda: lambdaOf(m), runs: CUP_RUNS, seed: 5 });
+    if (compOf(slug)?.kind === 'estadual') res = estadualOdds(slug, c);
+    else {
+      const m = cupModel(slug);
+      if (m) res = knockoutOdds({ phases: c.phases, comp: compOf(slug), lambda: lambdaOf(m), runs: CUP_RUNS, seed: 5 });
+    }
   } catch (err) {
     state.diag.errors.push({ part: 'chances do mata-mata', error: errText(err), t: Date.now() });
   }
@@ -1335,7 +1437,7 @@ function cupHtml(slug) {
   }
   const ours = serieA();
   const odds = cupOddsOf(slug);
-  const openIdx = odds ? c.phases.indexOf(odds.phase) : -1;
+  const openIdx = odds?.phase ? c.phases.indexOf(odds.phase) : -1;
   let body;
   if (phase.knockout) {
     const ties = tiesOf(phase.events);
@@ -1363,12 +1465,39 @@ function cupHtml(slug) {
     body = ui.daySections(days.map((d) => ({ label: dayLabel(d.date, new Date()), events: d.events, cards: d.events.map((e) => anyCard(e, '')) })))
       + (comp.kind === 'continental' && list.length < phase.events.length ? `<p class="chart-note center">Mostrando só os jogos dos clubes da Série A (${list.length} de ${phase.events.length}).</p>` : '');
   }
-  // As chances de título aparecem na fase em aberto, nas seguintes e na que acabou de terminar.
-  const showOdds = odds && c.phaseIdx >= openIdx - 1;
-  const chances = showOdds ? ui.titleOdds(odds, { favorite: state.favorite }) : (c.phaseIdx === c.phases.length - 1 || phase.knockout ? noteOr(oddsWhy(slug, phase)) : '');
+  let chances;
+  if (comp.kind === 'estadual') chances = estadualBlock(slug, odds);
+  else {
+    // As chances de título aparecem na fase em aberto, nas seguintes e na que acabou de terminar.
+    const showOdds = odds && openIdx >= 0 && c.phaseIdx >= openIdx - 1;
+    chances = showOdds ? ui.titleOdds(odds, { favorite: state.favorite }) : (c.phaseIdx === c.phases.length - 1 || phase.knockout ? noteOr(oddsWhy(slug, phase)) : '');
+  }
   return tabs + chances + (body || '<p class="empty">Nenhum jogo nesta fase.</p>');
 }
 const noteOr = (text) => (text ? `<p class="chart-note">${esc(text)}</p>` : '');
+
+// Chances no estadual: classificar, cair, chegar à final e ser campeão (enquanto houver o que decidir).
+function estadualBlock(slug, odds) {
+  const comp = compOf(slug);
+  if (!odds) return '';
+  if (odds.unknown) return noteOr(`O formato do ${comp.name} de ${odds.year} ainda não foi conferido no app; as chances aparecem quando ele for.`);
+  const teams = new Map();
+  for (const e of cupEvents(slug)) for (const t of [e.home, e.away]) if (!t.tbd) teams.set(t.id, t);
+  const rows = [...odds.est.byTeam].map(([id, v]) => ({ team: teams.get(id), ...v })).filter((r) => r.team);
+  if (!rows.length || rows.every((r) => r.title === 0 || r.title === 1)) return '';
+  const f = odds.format;
+  const advance = f.bracket[0].pairs.length * 2;
+  const down = f.first.relegate || f.first.relegationStage?.relegate || 0;
+  const shape = `${f.first.teams} times${f.first.groups ? ` em ${f.first.groups} grupos` : ''}, ${advance} vão ao mata-mata${down ? `, ${down === 1 ? 'cai 1' : `caem ${down}`}` : ''}`;
+  const old = odds.formatYear !== odds.year ? ` (o de ${odds.year} ainda não foi conferido)` : '';
+  return ui.stateOdds({
+    title: `Chances no ${comp.name}`,
+    rows,
+    firstOpen: odds.est.firstLeft > 0,
+    favorite: state.favorite,
+    note: `${odds.runs.toLocaleString('pt-BR')} simulações do que falta, no formato de ${odds.formatYear}${old}: ${shape}. Clubes da Série A com a força do Brasileirão; os outros partem abaixo e se ajustam pelos jogos do estadual deste ano e do anterior. Empate no mata-mata vai aos pênaltis, 50% para cada lado.`,
+  });
+}
 
 // "Ida · dom 01/11", "Volta · pênaltis 5 x 3"
 function legNote(e) {
@@ -1837,6 +1966,11 @@ document.addEventListener('visibilitychange', () => {
   checkVersion({ auto: true });
 });
 window.addEventListener('online', () => tick({ warm: true }));
+// Endereço trocado à mão ou por um link (#libertadores): abre a competição.
+window.addEventListener('hashchange', () => {
+  const slug = compKeyToSlug(decodeURIComponent(location.hash.slice(1)) || 'hoje');
+  if (slug !== state.comp) setComp(slug);
+});
 setInterval(() => {
   if (document.hidden) return;
   safe('o topo', renderFreshness);

@@ -1081,3 +1081,28 @@ function legendOf(rows) {
 export function moreBlock(title, inner, key, open = {}) {
   return `<details class="more-block" data-keep="${esc(key)}"${open[key] ? ' open' : ''}><summary>${esc(title)}</summary>${inner}</details>`;
 }
+
+/**
+ * Chances no estadual. rows: [{team, qualify, final, title, relegate}]; firstOpen: a primeira fase ainda está
+ * rolando (mostra classificar e cair); depois, só chegar à final e ser campeão de quem segue vivo.
+ */
+export function stateOdds({ title, rows, firstOpen, favorite, note }) {
+  // Rebaixamento ainda aberto (a primeira fase, ou o quadrangular do Carioca depois dela).
+  const downOpen = rows.some((r) => r.relegate > 0.005 && r.relegate < 0.995);
+  const list = (firstOpen ? rows : rows.filter((r) => r.title > 0 || r.final > 0 || (downOpen && r.relegate > 0.005)))
+    .sort((a, b) => b.title - a.title || b.qualify - a.qualify || a.relegate - b.relegate);
+  const showDown = (firstOpen && rows.some((r) => r.relegate > 0.005)) || downOpen;
+  const cols = [...(firstOpen ? [['qualify', 'Mata-mata'], ['title', 'Título']] : [['final', 'Final'], ['title', 'Título']]), ...(showDown ? [['relegate', 'Cai']] : [])];
+  const cell = (v, key) => `<td class="${key === 'relegate' && v >= 0.5 ? 'so-bad' : key === 'title' && v >= 0.5 ? 'so-good' : ''}">${v < 0.005 ? (v > 0 ? '<1%' : '–') : pctOf(v)}</td>`;
+  return `<section class="block cup-odds">
+    <h2 class="section-title">${esc(title)}</h2>
+    <div class="table-wrap"><table class="standings mini-standings state-odds">
+      <thead><tr><th class="club">Clube</th>${cols.map(([, label]) => `<th>${label}</th>`).join('')}</tr></thead>
+      <tbody>${list.map((r) => `<tr class="${r.team.id === favorite ? 'is-fav' : ''}">
+        <td class="club"><span class="club-cell">${crest(r.team.logo, r.team.name, 20, 'mini')}<span class="club-name">${esc(r.team.name)}</span></span></td>
+        ${cols.map(([key]) => cell(r[key], key)).join('')}
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <p class="chart-note">${esc(note)}</p>
+  </section>`;
+}

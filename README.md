@@ -88,6 +88,21 @@ Os dados vêm da API pública da ESPN (`site.api.espn.com`), chamada direto do n
 
 A ESPN não informa a rodada de cada jogo. O app usa o fato de que, no Brasileirão, a rodada r+19 repete a rodada r com o mando invertido: os dois jogos de cada confronto ficam no mesmo par de rodadas, então um jogo adiado, antecipado ou de rodada dividida é colocado na rodada certa pelo outro jogo do confronto. Conferido contra as rodadas oficiais (Cartola FC) de 2026: as 380 partidas na rodada certa. Quando a ESPN remarca um jogo adiado, ela cria um jogo novo e mantém o antigo como "adiado"; o app descarta o antigo. Sem a temporada completa, o app agrupa por datas (menos preciso com jogos remarcados).
 
+## Todos os campeonatos (app à parte)
+
+Em [`campeonatos/`](https://gabrieltt1103-creator.github.io/Resultados-Brasileirao/campeonatos/) fica um segundo app, com todos os campeonatos dos clubes da Série A que a ESPN cobre. O app do Brasileirão (a página principal e a v2) continua igual: o novo tem a sua própria cópia do código (só a aparência da v1), e o que ele guarda no celular leva o prefixo `camp:`, para um não mexer nos dados do outro. Na primeira vez, ele traz do app do Brasileirão o time escolhido, os rivais, o secador e o som.
+
+- **Botões de campeonato** no topo: Hoje, Brasileirão, Copa do Brasil, Libertadores, Sul-Americana, Paulista, Carioca, Mineiro, Gaúcho, Supercopa do Brasil, Recopa e Intercontinental (só os que têm jogos no ano), com ponto vermelho quando há jogo de clube da Série A ao vivo. O endereço guarda a competição (`#libertadores`, `#copa-do-brasil`), para compartilhar.
+- **Hoje**: os jogos do dia dos clubes da Série A em todas as competições, agrupados por campeonato, com as setas para trocar de dia. Dia sem jogo mostra atalhos para o dia com jogo mais perto.
+- **Brasileirão**: tudo o que o app de sempre faz (rodada, tabela ao vivo, simulador, secador, números).
+- **Copas e estaduais**: a fase escolhida com as setas (abre na que está rolando, na que acabou de terminar ou na próxima). No mata-mata, cada confronto junta ida e volta, com agregado, pênaltis e quem passou ("campeão" na final). Na fase de grupos e nos pontos corridos, os jogos por dia; na Libertadores e na Sul-Americana, só os de clubes da Série A (os outros confrontos ficam recolhidos). A aba **Tabela** mostra os grupos ou a tabela da ESPN, com as vagas.
+- **Chances no mata-mata**: chance de cada time passar do confronto, chegar à final e ser campeão, em 10.000 simulações. Usa o mesmo modelo de força das chances do Brasileirão; ida e volta sem gol fora (empate no agregado vai aos pênaltis, 50% para cada lado), final em jogo único em campo neutro com prorrogação, e os vencedores se cruzam por sorteio nas fases seguintes. Na Libertadores e na Sul-Americana, a força dos estrangeiros vem dos jogos continentais deste ano e do anterior (partindo de ataque 0,8 e defesa 1,2, abaixo da média brasileira). Testado em 901 jogos de brasileiro x estrangeiro de 2018 a 2025: erro (RPS) de 0,193, contra 0,225 só com o mando, e previa 52% de vitória dos brasileiros, que venceram 53%. Com time de outra divisão no confronto (Copa do Brasil até as oitavas), não há chances.
+- **Detalhe do jogo** de qualquer competição: placar, gols, escalações, técnico (clubes da Série A), estatísticas, leitura do jogo e gráfico de pressão (onde a ESPN publica o lance a lance: Libertadores, Sul-Americana, Paulista e as fases finais da Copa do Brasil), palpite do modelo e últimos 5 jogos em todas as competições. A disputa de pênaltis não entra como gol do jogo.
+- **Página do time**: os próximos jogos de todas as competições.
+- Cada competição é lida à parte (a temporada inteira numa chamada, de 85 a 130 KB), guardada no celular e atualizada dia a dia quando tem jogo rolando; uma que falha não derruba as outras. O "Status dos dados" mostra cada uma.
+
+Fora por enquanto: Paranaense, Baiano, Catarinense, Paraense e Copa Verde (a ESPN não cobre) e a Copa do Nordeste (só o placar). Carioca, Mineiro e Gaúcho não têm lance a lance na ESPN, então ficam sem leitura do jogo e sem gráfico de pressão.
+
 ## Duas versões do visual
 
 O app tem duas aparências com os mesmos dados e a mesma lógica (tabela, rodadas, simulação, chances), para comparar qual funciona melhor:
@@ -135,6 +150,7 @@ Não há build nem dependências: os módulos em `js/` rodam direto no navegador
 | `js/ui.js` | Monta o HTML de cada parte da tela (versão atual) |
 | `js/ui-v2.js`, `v2/` | Versão 2 do visual: o que muda em relação ao `ui.js`, a página e o CSS |
 | `js/app.js` | Estado, atualização automática e interações |
+| `campeonatos/` | App de todos os campeonatos: cópia própria do código (aparência da v1), com `js/comps.js` (competições, fases e confrontos) e `js/knockout.js` (chances no mata-mata) |
 | `tests/` | Testes: temporada fictícia no formato da ESPN e retrato da temporada real de 2026 com as rodadas oficiais |
 
 A API da ESPN não é oficial e pode mudar de formato sem aviso. Se o app parar de mostrar os jogos, o ponto a ajustar é `js/espn.js`.

@@ -1,0 +1,17 @@
+{
+  "name": "Campeonatos ao Vivo · clubes da Série A",
+  "short_name": "Campeonatos",
+  "description": "Placar em tempo real de todos os campeonatos dos clubes da Série A, com tabela ao vivo, chances e estatísticas.",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef2ef",
+  "theme_color": "#0b6b3a",
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "../icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

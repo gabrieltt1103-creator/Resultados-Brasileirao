@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Campeonatos ao Vivo</title>
+  <meta name="description" content="Placar em tempo real de todos os campeonatos dos clubes da Série A: Brasileirão, Copa do Brasil, Libertadores, Sul-Americana e estaduais, com tabela ao vivo, chances e estatísticas.">
+  <meta name="theme-color" content="#0b6b3a" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b2a1b" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Campeonatos">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="../icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://site.api.espn.com" crossorigin>
+  <link rel="preconnect" href="https://a.espncdn.com">
+  <!-- As fontes não seguram a primeira pintura: a página aparece com a fonte do sistema e troca quando chegam. -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap"></noscript>
+  <link rel="stylesheet" href="style.css">
+  <!-- Todos os módulos baixam juntos, sem esperar um importar o outro. -->
+  <link rel="modulepreload" href="js/app.js">
+  <link rel="modulepreload" href="js/espn.js">
+  <link rel="modulepreload" href="js/rounds.js">
+  <link rel="modulepreload" href="js/table.js">
+  <link rel="modulepreload" href="js/insights.js">
+  <link rel="modulepreload" href="js/sim.js">
+  <link rel="modulepreload" href="js/secador.js">
+  <link rel="modulepreload" href="js/coach.js">
+  <link rel="modulepreload" href="js/comps.js">
+  <link rel="modulepreload" href="js/knockout.js">
+  <link rel="modulepreload" href="js/season.js">
+  <link rel="modulepreload" href="js/fx.js">
+  <link rel="modulepreload" href="js/ui.js">
+  <link rel="modulepreload" href="js/util.js">
+</head>
+<body>
+  <header class="band">
+    <div class="band-top">
+      <span class="league"><span id="league">Todos os campeonatos</span> <span id="season"></span></span>
+      <div class="band-actions">
+        <button id="sound" class="icon-btn" type="button" aria-pressed="false" aria-label="Som de gol desligado">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path class="waves" d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path class="mute" d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button id="refresh" class="refresh" type="button" aria-label="Atualizar agora">
+          <span id="pulse" class="pulse" hidden></span>
+          <span id="updated" class="updated"><b>Carregando…</b></span>
+          <svg class="refresh-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+    <nav id="comps" class="comp-nav" aria-label="Campeonatos"></nav>
+    <nav class="round-nav" aria-label="Rodadas">
+      <button id="prev" class="arrow" type="button" aria-label="Rodada anterior" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="round-title">
+        <h1 id="round-name">Rodada</h1>
+        <p id="round-dates" class="round-dates">&nbsp;</p>
+      </div>
+      <button id="next" class="arrow" type="button" aria-label="Próxima rodada" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </nav>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="jogos" aria-selected="true" aria-controls="view-jogos" id="tab-jogos" type="button">Jogos</button>
+      <button class="tab" role="tab" data-tab="tabela" aria-selected="false" aria-controls="view-tabela" id="tab-tabela" type="button">Tabela</button>
+      <button class="tab" role="tab" data-tab="simular" aria-selected="false" aria-controls="view-simular" id="tab-simular" type="button">Simular</button>
+      <button class="tab" role="tab" data-tab="numeros" aria-selected="false" aria-controls="view-numeros" id="tab-numeros" type="button">Números</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-jogos" data-tab="jogos" role="tabpanel" aria-labelledby="tab-jogos">
+      <div id="fav"></div>
+      <div id="secador"></div>
+      <div id="others"></div>
+      <div id="news"></div>
+      <p id="summary" class="summary" hidden></p>
+      <div id="matches" class="matches">
+        <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+      </div>
+      <div id="fav-hint"></div>
+      <div class="share-row">
+        <button id="share" class="share" type="button" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 15V4m0 0L8 8m4-4l4 4M5 13v6h14v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Compartilhar placares
+        </button>
+      </div>
+    </section>
+    <section id="view-tabela" data-tab="tabela" role="tabpanel" aria-labelledby="tab-tabela" hidden>
+      <p id="table-note" class="table-note"></p>
+      <div id="table-wrap" class="table-wrap"></div>
+      <ul id="legend" class="legend"></ul>
+      <div id="table-check"></div>
+    </section>
+    <section id="view-simular" data-tab="simular" role="tabpanel" aria-labelledby="tab-simular" hidden>
+      <div id="sim" class="sim"></div>
+    </section>
+    <section id="view-numeros" data-tab="numeros" role="tabpanel" aria-labelledby="tab-numeros" hidden>
+      <div id="stats"></div>
+    </section>
+    <section id="view-comp" class="view-comp" aria-live="polite" hidden>
+      <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+    </section>
+    <div id="error" class="error" role="alert" hidden>
+      <p id="error-text"></p>
+      <button id="retry" type="button">Tentar de novo</button>
+    </div>
+  </main>
+
+  <footer class="foot">
+    Dados da ESPN. Atualiza sozinho a cada 30&nbsp;s durante os jogos.
+    <a class="link" href="../">App só do Brasileirão</a>
+    <button id="diag" type="button" class="link" data-action="diag">Status dos dados</button>
+  </footer>
+
+  <dialog id="sheet" class="sheet" aria-label="Detalhes">
+    <div class="sheet-bar">
+      <button id="sheet-back" class="icon-btn" type="button" aria-label="Voltar" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="grip" aria-hidden="true"></span>
+      <button id="sheet-close" class="icon-btn" type="button" aria-label="Fechar">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="sheet-scroll"><div id="sheet-body"></div></div>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

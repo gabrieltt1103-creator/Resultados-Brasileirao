@@ -30,6 +30,14 @@ const SHOTS = 0.25;      // peso dos chutes no gol (convertidos em gols) junto c
 const CARRY = 0.8;       // a força do ano anterior, puxada para a média (expoente)
 // Quem subiu da Série B começa com a força média dos que subiram de 2015 a 2026.
 export const PROMOTED = { att: 0.89, def: 1.1 };
+// Revisão com as odds de fechamento do mercado (4.485 jogos de 2015 a 2026): o modelo achatava os jogos (o
+// favorito vencia mais do que ele dizia) e o empate caía rápido demais nos jogos de muitos gols.
+const STRETCH = 1.2;     // expoente na força medida, que os jogos fictícios e os chutes no gol puxam para a média
+const HOME = 1.14;       // mando de sempre: 1,3 gol do mandante para cada 1 do visitante
+const AWAY = 0.88;
+const HOME_K = 30;       // jogos fictícios no mando de sempre, junto com o mando medido na temporada
+const DRAW_SLOPE = 0.03; // empate: 3 pontos a mais por gol esperado acima de DRAW_MID (e a menos abaixo)
+const DRAW_MID = 2.45;
 
 const sotOf = (side) => side.sot ?? side.stats?.shotsOnTarget;
 
@@ -65,19 +73,21 @@ function fit(games, ids, { prior = null, K = K_FLAT, half = HALF_LIFE } = {}) {
   const pd = p0('def');
   const att = Float64Array.from(pa);
   const def = Float64Array.from(pd);
-  let hf = 1.14; // sem jogos suficientes, o mando de sempre (1,3 gol do mandante para cada 1 do visitante)
-  let af = 0.88;
+  let hf = HOME;
+  let af = AWAY;
   const y = new Float64Array(n);
   const x = new Float64Array(n);
   for (let it = 0; it < 30; it++) {
-    if (G.length >= 30) {
+    // Mando: o medido na amostra, com HOME_K jogos fictícios no mando de sempre (no começo da temporada, quase só ele).
+    if (G.length) {
       let hy = 0, he = 0, ay = 0, ae = 0;
       for (const g of G) {
         hy += g.w * g.hs; he += g.w * avg * att[g.h] * def[g.a];
         ay += g.w * g.as; ae += g.w * avg * att[g.a] * def[g.h];
       }
-      hf = hy / he;
-      af = ay / ae;
+      const k = HOME_K * avg;
+      hf = (hy + k * HOME) / (he + k);
+      af = (ay + k * AWAY) / (ae + k);
     }
     // Ataque: gols feitos sobre os esperados contra aquelas defesas; depois a defesa, contra aqueles ataques.
     y.fill(0); x.fill(0);
@@ -120,9 +130,12 @@ const done = (events) => events.filter((e) => e.status.kind === 'post' && e.home
  * Força de ataque e de defesa de cada time (1 = média do campeonato) e vantagem de jogar em casa.
  * rows: tabela (os times); events: jogos da temporada; prior: força de partida pela temporada anterior
  * (priorFrom), que pesa como K_PRIOR jogos, com quem subiu na força média dos que sobem.
+ * A força medida vem esticada (STRETCH), para devolver a distância entre os times.
  */
 export function model(rows, events, prior = null) {
-  return fit(done(events), [...rows.keys()], prior?.size ? { prior, K: K_PRIOR } : {});
+  const m = fit(done(events), [...rows.keys()], prior?.size ? { prior, K: K_PRIOR } : {});
+  for (const v of [m.att, m.def]) for (const [id, s] of v) v.set(id, s ** STRETCH);
+  return m;
 }
 
 /**
@@ -147,15 +160,48 @@ export function expectedGoals(m, homeId, awayId) {
 const FACT = [1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800];
 const pmf = (l, k) => Math.exp(-l) * l ** k / FACT[k];
 
+// Empate de um jogo inteiro: no Poisson puro (d), ele cai rápido demais com o total de gols esperado; nos
+// Brasileirões de 2015 a 2026, os jogos de 3 gols esperados ou mais empataram 23% (o Poisson dava 20%) e os de
+// menos de 2, 30% (dava 32%). A chance corrigida de empate.
+const drawTarget = (d, total) => Math.min(0.6, Math.max(0.05, d + DRAW_SLOPE * (total - DRAW_MID)));
+
+/**
+ * Placar sorteado para um jogo inteiro, com o empate corrigido: parte do Poisson e troca alguns resultados
+ * (vitória por empate, ou empate por vitória) até a chance de empate chegar à corrigida.
+ */
+export function sampleScore(lh, la, rand) {
+  let h = poisson(lh, rand);
+  let a = poisson(la, rand);
+  // Chance de empate no Poisson: soma de p(k, k), cada termo pelo anterior.
+  const x = lh * la;
+  const p0 = Math.exp(-lh - la);
+  let d = 0;
+  for (let k = 0, p = p0; k <= 10; k++, p *= x / (k * k)) d += p;
+  const d2 = drawTarget(d, lh + la);
+  if (d2 > d && h !== a && rand() < (d2 - d) / (1 - d)) {
+    // Vira empate: k x k, na proporção de p(k, k).
+    let u = rand() * d;
+    let k = 0;
+    for (let p = p0; k < 10 && u > p; k++, p *= x / (k * k)) u -= p;
+    return [k, k];
+  }
+  if (d2 < d && h === a && rand() < (d - d2) / d) {
+    do { h = poisson(lh, rand); a = poisson(la, rand); } while (h === a);
+  }
+  return [h, a];
+}
+
 /**
  * Chances de vitória do mandante, empate e vitória do visitante, e a matriz de placares finais.
- * Num jogo ao vivo, parte do placar atual e só considera os gols do tempo que falta.
+ * Num jogo ao vivo, parte do placar atual e só considera os gols do tempo que falta (sem a correção do
+ * empate, medida em jogos inteiros).
  */
 export function matchOdds(m, ev) {
   let [lh, la] = expectedGoals(m, ev.home.id, ev.away.id);
   let h0 = 0;
   let a0 = 0;
-  if (ev.status.kind === 'live' && ev.home.score != null) {
+  const live = ev.status.kind === 'live' && ev.home.score != null;
+  if (live) {
     const f = remaining(ev);
     lh *= f;
     la *= f;
@@ -176,6 +222,14 @@ export function matchOdds(m, ev) {
     }
   }
   const t = home + draw + away;
+  if (!live) {
+    const d = draw / t;
+    const d2 = drawTarget(d, lh + la);
+    const kd = d2 / d;
+    const kw = (1 - d2) / (1 - d);
+    for (const s of scores) s.p *= s.h === s.a ? kd : kw;
+    home *= kw; away *= kw; draw *= kd;
+  }
   return { home: home / t, draw: draw / t, away: away / t, scores, expected: [h0 + lh, a0 + la] };
 }
 
@@ -206,8 +260,8 @@ export function suggestScore(m, ev) {
 
 /** Placar sorteado para um jogo (usado nas simulações do campeonato). */
 export function randomScore(m, ev, rand = Math.random) {
-  const [lh, la] = expectedGoals(m, ev.home.id, ev.away.id);
-  return { h: poisson(lh, rand), a: poisson(la, rand) };
+  const [h, a] = sampleScore(...expectedGoals(m, ev.home.id, ev.away.id), rand);
+  return { h, a };
 }
 
 // Fração do jogo que ainda falta, pelo minuto exibido.
@@ -286,7 +340,7 @@ function prepare({ finished, events, overrides = {}, prior = null }) {
 // ataque e da defesa), mais quando falta muito campeonato: a força medida tem erro e muda até o fim (técnico,
 // lesões, reforços). Sem isso, as chances ficavam confiantes demais: o que o modelo dava como menos de 2%
 // acontecia 5 vezes mais do que isso (temporadas de 2015 a 2025).
-const spreadFor = (left, n) => 0.02 + 0.15 * Math.sqrt(Math.min(1, left / Math.max(1, n * (n - 1))));
+const spreadFor = (left, n) => 0.02 + 0.18 * Math.sqrt(Math.min(1, left / Math.max(1, n * (n - 1))));
 
 function gauss(rand) {
   let u = 0;
@@ -331,7 +385,7 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
       if (hs > as) { P[h] += 3; W[h]++; } else if (hs < as) { P[a] += 3; W[a]++; } else { P[h]++; P[a]++; }
     };
     for (const [h, a, hs, as, lh, la] of live) play(h, a, hs + poisson(lh * ea[h] * ed[a], rand), as + poisson(la * ea[a] * ed[h], rand));
-    for (const [h, a, lh, la] of left) play(h, a, poisson(lh * ea[h] * ed[a], rand), poisson(la * ea[a] * ed[h], rand));
+    for (const [h, a, lh, la] of left) play(h, a, ...sampleScore(lh * ea[h] * ed[a], la * ea[a] * ed[h], rand));
     for (let i = 0; i < n; i++) jitter[i] = rand();
     order.sort((x, y) => P[y] - P[x] || W[y] - W[x] || D[y] - D[x] || F[y] - F[x] || jitter[y] - jitter[x]);
     for (let p = 0; p < n; p++) posCount[order[p] * n + p]++;
@@ -432,8 +486,7 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
       add(h, a, x, y, 1);
     });
     left.forEach(([h, a, lh, la], k) => {
-      const x = poisson(lh * ea[h] * ed[a], rand);
-      const y = poisson(la * ea[a] * ed[h], rand);
+      const [x, y] = sampleScore(lh * ea[h] * ed[a], la * ea[a] * ed[h], rand);
       leftRes[2 * k] = x; leftRes[2 * k + 1] = y;
       add(h, a, x, y, 1);
     });

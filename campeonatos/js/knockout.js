@@ -1,6 +1,6 @@
 // Chances no mata-mata: sorteia os confrontos que faltam (ida e volta, final em jogo único com
 // prorrogação e pênaltis) com a força de cada time, do mesmo modelo das chances do Brasileirão.
-import { rng } from './sim.js';
+import { rng, sampleScore } from './sim.js';
 import { tiesOf } from './comps.js';
 
 function poisson(lambda, rand) {
@@ -62,9 +62,12 @@ export function knockoutOdds({ phases, comp, lambda, runs = 10000, seed = 5, spr
   const rand = rng(seed);
   const ea = new Map();
   const ed = new Map();
+  // Jogo inteiro com o empate corrigido (sampleScore); pedaço de jogo (ao vivo, prorrogação), Poisson puro.
   const goals = (h, a, neutral, f = 1) => {
     const l = lambda(h, a, neutral);
-    return [poisson(l[0] * ea.get(h) * ed.get(a) * f, rand), poisson(l[1] * ea.get(a) * ed.get(h) * f, rand)];
+    const lh = l[0] * ea.get(h) * ed.get(a);
+    const la = l[1] * ea.get(a) * ed.get(h);
+    return f === 1 ? sampleScore(lh, la, rand) : [poisson(lh * f, rand), poisson(la * f, rand)];
   };
   // Jogo único em campo neutro: 90 minutos, prorrogação (um terço de jogo) e pênaltis.
   const single = (x, y) => {

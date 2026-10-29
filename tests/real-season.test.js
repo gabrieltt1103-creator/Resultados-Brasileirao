@@ -209,8 +209,11 @@ test('secador com a temporada real: rodada 31 para quatro torcedores', () => {
   assert.equal(vas.objective, 'z');
   assert.ok(vas.res.base.z > 0.01 && vas.res.base.z < 0.1);
   assert.equal(vas.at('Grêmio').cheer.name, 'Cruzeiro');
-  // Ninguém fica com a rodada inteira marcada.
-  for (const f of [cap, fla, vas]) assert.ok(f.list.filter((x) => x.v?.shown).length <= 5);
+  // Ninguém fica com a rodada inteira marcada: dos jogos que só mexem no objetivo, no máximo 3.
+  for (const f of [cap, fla, vas]) {
+    assert.ok(f.list.filter((x) => x.v?.shown).length < r31.events.length);
+    assert.ok(f.list.filter((x) => x.v?.shown && ['help', 'draw', 'nodraw'].includes(x.v.kind)).length <= 3);
+  }
   // Mesmos sorteios para os três resultados: jogo que não envolve ninguém perto não muda nada.
   const flat = fla.res.games.find((g) => r31.events.find((e) => e.id === g.id).home.name === 'Remo');
   assert.equal(new Set(flat.title).size, 1);

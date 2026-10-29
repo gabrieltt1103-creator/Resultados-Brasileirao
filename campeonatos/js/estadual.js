@@ -1,6 +1,6 @@
 // Chances nos estaduais (Paulista e Carioca): sorteia o que falta da primeira fase, o rebaixamento e o
 // mata-mata, seguindo o formato do ano (que muda quase todo ano e vem de FORMATS, em comps.js).
-import { rng } from './sim.js';
+import { rng, sampleScore } from './sim.js';
 import { tiesOf } from './comps.js';
 
 function poisson(lambda, rand) {
@@ -62,11 +62,14 @@ export function stateOdds({ events, format, groups = null, lambda, runs = 5000, 
   const rand = rng(seed);
   const ea = new Float64Array(n);
   const ed = new Float64Array(n);
+  // Jogo inteiro com o empate corrigido (sampleScore); o que falta de um jogo ao vivo, Poisson puro.
   const goals = (h, a, neutral, f = 1) => {
     const l = lambda(h, a, neutral);
     const i = idx.get(h);
     const j = idx.get(a);
-    return [poisson(l[0] * ea[i] * ed[j] * f, rand), poisson(l[1] * ea[j] * ed[i] * f, rand)];
+    const lh = l[0] * ea[i] * ed[j];
+    const la = l[1] * ea[j] * ed[i];
+    return f === 1 ? sampleScore(lh, la, rand) : [poisson(lh * f, rand), poisson(la * f, rand)];
   };
   const byPhase = new Map();
   for (const e of events) {

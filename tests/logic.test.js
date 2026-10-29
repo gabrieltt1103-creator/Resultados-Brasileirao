@@ -171,6 +171,27 @@ test('sugestão de placar e chances de cada jogo', () => {
   assert.ok(Number.isInteger(r.h) && Number.isInteger(r.a));
 });
 
+test('empate corrigido pelo total de gols esperado, igual na chance do jogo e no sorteio', () => {
+  // Gols esperados fixos: 1,9 x 1,2 (jogo de muitos gols) e 0,8 x 0,7 (de poucos).
+  const fixed = (lh, la) => ({ avg: 1, home: 1, away: 1, att: new Map([['H', lh], ['A', la]]), def: new Map([['H', 1], ['A', 1]]) });
+  const ev = { home: { id: 'H' }, away: { id: 'A' }, status: { kind: 'pre' } };
+  const poissonDraw = (lh, la) => {
+    let d = 0;
+    for (let k = 0, p = Math.exp(-lh - la); k <= 10; k++, p *= (lh * la) / (k * k)) d += p;
+    return d;
+  };
+  for (const [lh, la] of [[1.9, 1.2], [0.8, 0.7]]) {
+    const o = matchPicks(fixed(lh, la), ev).odds;
+    // 3 pontos por gol esperado acima de 2,45 (e abaixo): mais empate com muitos gols, menos com poucos.
+    assert.ok(Math.abs(o.draw - poissonDraw(lh, la) - 0.03 * (lh + la - 2.45)) < 0.002);
+    const rand = rng(7);
+    let draws = 0;
+    const N = 100000;
+    for (let i = 0; i < N; i++) { const s = randomScore(fixed(lh, la), ev, rand); if (s.h === s.a) draws++; }
+    assert.ok(Math.abs(draws / N - o.draw) < 0.006);
+  }
+});
+
 test('força dos times desconta a força dos adversários', () => {
   // A e B fazem 2 x 1 em todos os jogos, mas A enfrentou os fortes e B, os fracos: A é mais forte.
   const ids = ['S1', 'S2', 'W1', 'W2', 'A', 'B'];

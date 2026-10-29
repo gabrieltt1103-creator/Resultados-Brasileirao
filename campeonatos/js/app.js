@@ -47,7 +47,7 @@ const CUP_IDLE_MS = 12 * HOUR;      // sem jogo por perto
 const GROUPS_MS = 5 * 60e3;
 const CUP_RUNS = 10000;
 // Estrangeiros (Libertadores, Sul-Americana) começam abaixo da média brasileira: testado de 2018 a 2025.
-const FOREIGN = { att: 0.8, def: 1.2 };
+const FOREIGN = { att: 0.85, def: 1.15 };
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -700,7 +700,7 @@ const lambdaOf = (m) => (h, a, neutral) => {
 /**
  * Modelo de força para uma competição: o do Brasileirão (clubes da Série A); na Libertadores e na
  * Sul-Americana, um ajuste conjunto com os jogos continentais deste ano e do anterior, que dá força aos
- * estrangeiros (partindo de ataque 0,8 e defesa 1,2, abaixo da média brasileira).
+ * estrangeiros (partindo de ataque 0,85 e defesa 1,15, abaixo da média brasileira).
  */
 let contMemo = { key: '', m: null };
 const estMemo = {};

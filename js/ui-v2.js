@@ -3,7 +3,7 @@
 // o número mostra e o que só se consulta de vez em quando fica recolhido. O que não muda (detalhe do
 // time, escolha do time, status dos dados, texto para compartilhar) vem direto de ui.js.
 export * from './ui.js';
-import { crest, flowChart, formDots, lineupsHtml, miniTable, pct, readingList, scorers, secadorLine, withSubs } from './ui.js';
+import { crest, flowChart, formDots, lineupsHtml, miniTable, pct, readingList, scorers, secadorLine, vagasNote, vagasRange, withSubs } from './ui.js';
 import { bucketLabels, goalTimeNote, h2hSummary, homeAwayNote, storyTags, tableLine } from './insights.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, weekdayShort } from './util.js';
 
@@ -276,6 +276,32 @@ const HOW = (zones, open) => `<details class="v2-more" data-keep="how-odds"${ope
   <p>Com essas forças, o app sorteia o placar de cada jogo que falta, refaz o campeonato 3.000 vezes e conta em quantas cada time termina campeão, no ${esc(zones.gLabel || 'G6')} ou no ${esc(zones.zLabel || 'Z4')}. Em cada uma, a força dos times varia um pouco (mais quando falta muito campeonato), porque ela pode mudar até o fim. Testado nos Brasileirões de 2015 a 2025, prevendo cada rodada só com o que se sabia antes.</p></div>
 </details>`;
 
+// Vaga na Libertadores com os cenários das copas: chance de cada time terminar até cada posição (G6, G7…)
+// e, na última linha, a chance de a vaga chegar até lá.
+function vagasBlock({ odds, base, teams, vr, favorite, names }) {
+  const ks = [];
+  for (let k = vr.from; k <= vr.to; k++) ks.push(k);
+  const at = (t, k) => odds.byId.get(t.id).cum?.[k - 1] ?? 0;
+  const known = teams.filter((t) => odds.byId.has(t.id));
+  const sure = known.filter((t) => at(t, vr.from) >= 0.995);
+  const open = known.filter((t) => at(t, vr.from) < 0.995 && at(t, vr.to) >= 0.005)
+    .sort((x, y) => at(y, vr.from) - at(x, vr.from) || at(y, vr.to) - at(x, vr.to)).slice(0, 9);
+  const cell = (t, k) => {
+    const b = base?.byId.get(t.id);
+    const raw = b ? Math.round((at(t, k) - (b.cum?.[k - 1] ?? 0)) * 100) : 0;
+    const d = Math.abs(raw) >= 2 ? raw : 0;
+    return `<td>${pct(at(t, k))}${d ? `<small class="${d > 0 ? 'good' : 'bad'}">${d > 0 ? '+' : ''}${d}</small>` : ''}</td>`;
+  };
+  return `<h4>Vaga na Libertadores</h4>
+    ${sure.length ? `<p class="v2-cap muted tight">${esc(names(sure))} ${sure.length === 1 ? 'fica' : 'ficam'} no G${vr.from} em praticamente todas as simulações.</p>` : ''}
+    <div class="table-wrap"><table class="v2-gtab">
+      <thead><tr><th class="tn">Chance de terminar até</th>${ks.map((k) => `<th>G${k}</th>`).join('')}</tr></thead>
+      <tbody>${open.map((t) => `<tr data-team="${esc(t.id)}" role="button" tabindex="0"><td class="tn"><span class="tnw">${crest(t.logo, t.name, 18, 'mini')}<span>${esc(t.name)}${t.id === favorite ? STAR : ''}</span></span></td>${ks.map((k) => cell(t, k)).join('')}</tr>`).join('')}</tbody>
+      <tfoot><tr><th class="tn">Chance de ter a vaga</th>${ks.map((k) => `<td>${pct(vr.atLeast(k))}</td>`).join('')}</tr></tfoot>
+    </table></div>
+    <p class="v2-cap muted">Na última linha, a chance de a vaga na Libertadores chegar até aquela posição. ${esc(vagasNote(odds.vagas))}</p>`;
+}
+
 // Chances separadas por objetivo, só com quem está na disputa.
 function chances({ odds, oddsBase, oddsNote, zones, sim, real, total, favorite, open }) {
   if (!odds) return `<section class="v2-block"><h3>Chances até o fim</h3><p class="v2-cap muted">${esc(oddsNote)}</p></section>`;
@@ -297,9 +323,12 @@ function chances({ odds, oddsBase, oddsNote, zones, sim, real, total, favorite, 
   const g = by('g').filter((t) => { const p = odds.byId.get(t.id).g; return p >= 0.005 && p < 0.995; }).slice(0, 7);
   const z = by('z').filter((t) => odds.byId.get(t.id).z >= 0.005).slice(0, 8);
   const sec = (name, rows, extra = '') => (rows.length || extra ? `<h4>${name}</h4>${extra}${rows.join('')}` : '');
+  const vr = vagasRange(odds.vagas);
+  const gBlock = vr && vr.to > vr.from ? vagasBlock({ odds, base, teams, vr, favorite, names })
+    : zones.g ? sec(`Vaga no ${esc(zones.gLabel)}`, g.map((t) => bar(t, 'g', true)), sure.length ? `<p class="v2-cap muted tight">${esc(names(sure))} ${sure.length === 1 ? 'fica' : 'ficam'} no ${esc(zones.gLabel)} em praticamente todas as simulações.</p>` : '') : '';
   return `<section class="v2-block v2-odds"><h3>Chances até o fim${total ? ' <small>com os seus placares</small>' : ''}</h3>
     ${sec('Título', title.map((t) => bar(t, 'title', true)))}
-    ${zones.g ? sec(`Vaga no ${esc(zones.gLabel)}`, g.map((t) => bar(t, 'g', true)), sure.length ? `<p class="v2-cap muted tight">${esc(names(sure))} ${sure.length === 1 ? 'fica' : 'ficam'} no ${esc(zones.gLabel)} em praticamente todas as simulações.</p>` : '') : ''}
+    ${gBlock}
     ${zones.zStart ? sec('Risco de cair', z.map((t) => bar(t, 'z', false, true))) : ''}
     <p class="v2-cap muted">${esc(oddsNote)}${total ? ' Os números pequenos mostram quanto os seus placares mudaram cada chance.' : ''}</p>
     ${HOW(zones, open['how-odds'])}

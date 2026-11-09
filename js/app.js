@@ -3,6 +3,9 @@ import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName,
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { chances, matchPicks, model, priorFrom, secador, suggestScore } from './sim.js';
+import { compOf, isKnockout, phasesOf } from './comps.js';
+import { knockoutOdds, openPhase } from './knockout.js';
+import { CONT, VAGAS_CUPS, continentalModel, lambdaOf, vagasInput } from './vagas.js';
 import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import { coachFits, fetchCoaches } from './coach.js';
@@ -36,6 +39,11 @@ const COACH_RETRY_MS = 10 * 60e3;   // sem resposta das fontes, tenta de novo de
 const LINEUP_MS = 2 * 60e3;         // perto do jogo, sem escalação ainda: busca o resumo de novo
 const PRIOR_KEY = 'forca-anterior:v1';
 const PRIOR_RETRY_MS = 30 * 60e3;   // sem a temporada anterior, tenta de novo depois disso
+const CUPS_KEY = 'copas-vagas:v1';
+const CONT_KEY = 'continental-anterior:v1';
+const CUP_MS = 30 * 60e3;           // copa com jogo de mata-mata de clube da Série A nos próximos dias
+const CUP_IDLE_MS = 12 * HOUR;      // sem jogo assim por perto
+const CUP_RUNS = 10000;
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -109,7 +117,12 @@ const state = {
   selectedBar: null,
   scrollTo: null,
   open: {},               // blocos recolhíveis abertos (sobrevivem às atualizações da tela)
-  diag: { season: null, standings: null, refresh: null, summary: null, cache: null, prior: null, errors: [] },
+  diag: { season: null, standings: null, refresh: null, summary: null, cache: null, prior: null, cups: {}, errors: [] },
+  cups: cupsCached(new Date().getFullYear()), // Copa do Brasil, Libertadores e Sul-Americana (vagas na Libertadores)
+  contPast: contCached(new Date().getFullYear() - 1), // jogos continentais do ano anterior (força dos estrangeiros)
+  contTry: 0,
+  vagas: null,
+  vagasSig: '',
 };
 
 // Força de partida guardada no celular: a temporada passada não muda mais, então vale o ano inteiro.
@@ -249,6 +262,7 @@ async function loadSeason() {
     state.seasonLoading = false;
     refresh();
     maybePrior();
+    loadCups();
   }
 }
 
@@ -406,6 +420,136 @@ async function loadPrior() {
   }
 }
 
+// ---------- copas: vagas na Libertadores pelo Brasileirão ----------
+// Copa do Brasil, Libertadores e Sul-Americana entram só para saber até que posição a tabela leva à
+// Libertadores (vagas.js). Guardadas no celular enxutas: só o que o mata-mata e o modelo usam.
+const slimSide = (t) => ({ id: t.id, score: t.score, pens: t.pens ?? null, tbd: !!t.tbd, sot: t.stats?.shotsOnTarget ?? t.sot ?? null });
+const slimCup = (e) => ({
+  id: e.id, date: +e.date, phase: e.phase, leg: e.leg, series: e.series,
+  status: { kind: e.status.kind, label: e.status.label, half: !!e.status.half }, home: slimSide(e.home), away: slimSide(e.away),
+});
+
+function cupsCached(year) {
+  const c = store(CUPS_KEY, null);
+  return Object.fromEntries(VAGAS_CUPS.map((slug) => {
+    const x = c?.year === year ? c.cups?.[slug] : null;
+    const events = Array.isArray(x?.events) ? x.events.map((e) => ({ ...e, date: new Date(e.date) })) : [];
+    return [slug, { events, t: x?.t || 0, ok: !!x, tried: 0, loading: false }];
+  }));
+}
+
+function saveCups() {
+  save(CUPS_KEY, { year: new Date().getFullYear(), cups: Object.fromEntries(VAGAS_CUPS.map((s) => [s, { t: state.cups[s].t, events: state.cups[s].events.map(slimCup) }])) });
+}
+
+const serieA = () => new Set((state.table?.rows || state.standings).map((t) => t.id));
+
+// De novo a cada 30 min com jogo de mata-mata de clube da Série A nos próximos 3 dias, a cada 12 h sem;
+// falhou, tenta em 2 min.
+function cupDue(slug, now) {
+  const c = state.cups[slug];
+  if (c.loading) return false;
+  if (!c.ok && c.tried && now - c.tried < SEASON_RETRY_MS) return false;
+  const ours = serieA();
+  const near = c.events.some((e) => e.status.kind !== 'post' && Math.abs(e.date - now) < 3 * 24 * HOUR && isKnockout(e.phase, compOf(slug)) && (ours.has(e.home.id) || ours.has(e.away.id)));
+  return !c.ok || now - c.t > (near ? CUP_MS : CUP_IDLE_MS);
+}
+
+let cupsLoading = false;
+async function loadCups() {
+  const now = Date.now();
+  const due = VAGAS_CUPS.filter((slug) => cupDue(slug, now));
+  if (cupsLoading || !due.length || !state.seasonOk) return;
+  cupsLoading = true;
+  try {
+    await Promise.all(due.map(async (slug) => {
+      const c = state.cups[slug];
+      c.loading = true;
+      c.tried = Date.now();
+      try {
+        const json = await espn.fetchCompYear(slug, new Date(c.tried).getFullYear());
+        c.events = (json?.events || []).map((raw) => { try { return espn.parseEvent(raw); } catch { return null; } }).filter(Boolean);
+        c.t = Date.now();
+        c.ok = true;
+        state.diag.cups[slug] = { t: c.t, ok: true, count: c.events.length };
+      } catch (err) {
+        c.ok = false;
+        state.diag.cups[slug] = { t: Date.now(), ok: false, error: errText(err) };
+      } finally {
+        c.loading = false;
+      }
+    }));
+    saveCups();
+  } finally {
+    cupsLoading = false;
+    maybeContPast();
+    scheduleOdds();
+  }
+}
+
+// Força dos estrangeiros: jogos da Libertadores e da Sul-Americana do ano anterior, lidos uma vez por ano
+// (só quando um clube da Série A ainda está vivo no mata-mata de uma delas).
+function contCached(year) {
+  const c = store(CONT_KEY, null);
+  return c?.year === year && Array.isArray(c.events) ? c.events.map((e) => ({ ...e, date: new Date(e.date) })) : null;
+}
+
+function maybeContPast() {
+  if (state.contPast || Date.now() - state.contTry < PRIOR_RETRY_MS) return;
+  const ours = serieA();
+  if (CONT.some((slug) => state.cups[slug].events.some((e) => e.status.kind !== 'post' && (ours.has(e.home.id) || ours.has(e.away.id))))) loadContPast();
+}
+
+async function loadContPast() {
+  state.contTry = Date.now();
+  const year = new Date().getFullYear() - 1;
+  try {
+    const res = await Promise.all(CONT.map((slug) => espn.fetchCompYear(slug, year)));
+    const events = res.flatMap((j) => (j?.events || []).map((raw) => { try { return espn.parseEvent(raw); } catch { return null; } }))
+      .filter((e) => e && e.status.kind === 'post' && e.home.score != null && e.away.score != null)
+      .map((e) => ({ id: e.id, date: e.date, status: { kind: 'post' }, home: slimSide(e.home), away: slimSide(e.away) }));
+    if (events.length < 100) return;
+    state.contPast = events;
+    save(CONT_KEY, { year, events: events.map((e) => ({ ...e, date: +e.date })) });
+    scheduleOdds();
+  } catch { /* tenta de novo mais tarde */ }
+}
+
+// Força para o mata-mata de cada copa: a do Brasileirão na Copa do Brasil; na Libertadores e na Sul-Americana,
+// o ajuste conjunto com os jogos continentais deste ano e do anterior (o mesmo do app de todos os campeonatos).
+let contMemo = { key: '', m: null };
+function cupLambda(slug) {
+  if (!CONT.includes(slug)) return lambdaOf(currentModel());
+  if (!state.contPast) return null;
+  const games = [...eventList(), ...CONT.flatMap((s) => state.cups[s].events), ...state.contPast];
+  const key = `${games.filter((e) => e.status.kind === 'post').length}|${!!state.prior}`;
+  if (contMemo.key !== key) contMemo = { key, m: continentalModel(games, serieA(), state.prior) };
+  return lambdaOf(contMemo.m);
+}
+
+/** O que as copas dão de vaga na Libertadores (vagasInput), refeito só quando algum jogo muda. */
+function vagasNow() {
+  if (state.table?.mode !== 'jogos') return null;
+  const done = eventList().filter((e) => e.status.kind === 'post').length;
+  const sig = [...VAGAS_CUPS.map((s) => state.cups[s].events.map((e) => `${e.id}:${e.status.kind}:${e.home.score}-${e.away.score}`).join(',')), done, !!state.prior, !!state.contPast].join('|');
+  if (sig === state.vagasSig) return state.vagas;
+  state.vagasSig = sig;
+  state.vagas = null;
+  try {
+    const cups = {};
+    for (const slug of VAGAS_CUPS) {
+      const comp = compOf(slug);
+      const phases = phasesOf(state.cups[slug].events, comp);
+      const lambda = phases.length && openPhase(phases) ? cupLambda(slug) : null;
+      cups[slug] = { phases, odds: lambda ? knockoutOdds({ phases, comp, lambda, runs: CUP_RUNS, seed: 5 }) : null };
+    }
+    state.vagas = vagasInput({ year: new Date().getFullYear(), cups, ours: serieA() });
+  } catch (err) {
+    state.diag.errors.push({ part: 'vagas na Libertadores', error: errText(err), t: Date.now() });
+  }
+  return state.vagas;
+}
+
 async function tick({ warm = false } = {}) {
   clearTimeout(state.timer);
   if (state.loading) return;
@@ -413,7 +557,7 @@ async function tick({ warm = false } = {}) {
   el.refresh.classList.add('loading');
   const now = Date.now();
   if (seasonDue(now)) loadSeason();
-  else maybePrior();
+  else { maybePrior(); loadCups(); }
   try {
     const r = await refreshHot(warm || now - state.lastWarm > WARM_MS);
     state.failed = false;
@@ -515,18 +659,18 @@ function inWorker(input, local) {
   });
 }
 
-function runOdds(finished, events, overrides) {
-  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS, prior: priorList() };
+function runOdds(finished, events, overrides, vagas) {
+  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS, prior: priorList(), vagas };
   return inWorker(input, () => {
     const out = chances({ ...input, finished, prior: state.prior });
-    return out ? { byId: [...out.byId], runs: out.runs, left: out.left } : null;
+    return out ? { byId: [...out.byId], runs: out.runs, left: out.left, vagas: out.vagas } : null;
   });
 }
 
 const priorList = () => (state.prior ? [...state.prior] : null);
 
 let oddsToken = 0;
-const asOdds = (r) => (r ? { byId: new Map(r.byId), runs: r.runs, left: r.left } : null);
+const asOdds = (r) => (r ? { byId: new Map(r.byId), runs: r.runs, left: r.left, vagas: r.vagas || null } : null);
 
 function scheduleOdds(delay = 30) {
   const t = state.table;
@@ -534,7 +678,9 @@ function scheduleOdds(delay = 30) {
   const list = eventList();
   const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
   const done = list.filter((e) => e.status.kind === 'post').length;
-  const baseSig = `${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}`;
+  const vagas = vagasNow();
+  const vagasSig = vagas ? vagas.cups.map((c) => c.map((x) => `${x.ids.join('+')}:${x.p.toFixed(3)}`).join(',')).join('/') : '';
+  const baseSig = `${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}|${vagasSig}`;
   const sig = `${baseSig}|${JSON.stringify(state.sims)}`;
   if (sig === state.oddsSig) return;
   clearTimeout(state.oddsTimer);
@@ -543,12 +689,12 @@ function scheduleOdds(delay = 30) {
     try {
       const sims = { ...state.sims };
       if (baseSig !== state.oddsBaseSig) {
-        const base = asOdds(await runOdds(t.finished, list, {}));
+        const base = asOdds(await runOdds(t.finished, list, {}, vagas));
         if (token !== oddsToken) return;
         state.oddsBase = base;
         state.oddsBaseSig = baseSig;
       }
-      const odds = Object.keys(sims).length ? asOdds(await runOdds(t.finished, list, sims)) : state.oddsBase;
+      const odds = Object.keys(sims).length ? asOdds(await runOdds(t.finished, list, sims, vagas)) : state.oddsBase;
       if (token !== oddsToken) return;
       state.odds = odds;
       state.oddsSig = sig;
@@ -998,7 +1144,7 @@ function renderSheet() {
     html = ui.diagSheet({
       ...state.diag, events: state.events.size, rounds: state.rounds.length, roundsMethod: state.rounds.method, roundsWhy: state.rounds.why,
       focus: roundName(focusRound()), complete: state.complete, seasonComplete: state.seasonComplete, mode: state.table?.mode || null,
-      odds: !!state.oddsBase, priorTeams: state.prior?.size || 0, check: state.check, adjust: state.adjust, names: new Map(allTeams().map((t) => [t.id, t.name])),
+      odds: !!state.oddsBase, vagas: state.oddsBase?.vagas || null, priorTeams: state.prior?.size || 0, check: state.check, adjust: state.adjust, names: new Map(allTeams().map((t) => [t.id, t.name])),
       ua: navigator.userAgent, modal: hasModal,
     });
   }

@@ -357,16 +357,49 @@ function jolt(ea, ed, spread, rand) {
 }
 
 /**
- * Chances de cada time terminar em cada faixa da tabela.
+ * Até que posição vai a vaga na Libertadores num campeonato sorteado (order: índices dos times, do 1º ao
+ * último). Sorteia o que cada copa dá de vaga (vagas.js): o total é o da tabela mais o das copas, e cada
+ * clube que já tem vaga por uma copa libera a sua da tabela; rebaixado não joga a Libertadores, então a vaga
+ * dele também desce para a tabela.
+ */
+export function libertadoresCut(order, rows, { base, cups }, zStart, rand) {
+  const pos = new Map(order.map((i, p) => [rows[i].id, p + 1]));
+  let total = base;
+  const holders = new Set();
+  for (const outcomes of cups) {
+    let u = rand();
+    let pick = outcomes[outcomes.length - 1];
+    for (const o of outcomes) {
+      if (u < o.p) { pick = o; break; }
+      u -= o.p;
+    }
+    for (const id of pick.ids) {
+      total++;
+      if (!(zStart && pos.get(id) >= zStart)) holders.add(id);
+    }
+  }
+  let free = total - holders.size;
+  for (let p = 0; p < order.length; p++) if (!holders.has(rows[order[p]].id) && --free === 0) return p + 1;
+  return order.length;
+}
+
+/**
+ * Chances de cada time terminar em cada faixa da tabela (cum: chance de terminar até cada posição).
  * finished: Map id -> linha com todos os jogos encerrados (precisa da temporada completa).
+ * vagas: o que as copas dão de vaga na Libertadores (vagasInput, em vagas.js); com elas, devolve também a
+ * chance de a vaga chegar até cada posição (vagas.dist: posição -> chance de ser a última com vaga).
  * Devolve null quando não dá para saber quais jogos faltam.
  */
-export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7, prior = null }) {
+export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7, prior = null, vagas = null }) {
   const prep = prepare({ finished, events, overrides, prior });
   if (!prep) return null;
   const { rows, n, pts, w, gd, gf, live, left, spread } = prep;
 
   const rand = rng(seed);
+  // As copas têm o seu próprio sorteio: com ou sem elas, os campeonatos sorteados são os mesmos.
+  const vg = vagas?.cups?.length ? vagas : null;
+  const vrand = rng(seed + 1);
+  const cuts = new Float64Array(n + 1);
   const posCount = new Uint32Array(n * n);
   const ptsSum = new Float64Array(n);
   const P = new Float64Array(n);
@@ -390,6 +423,7 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
     order.sort((x, y) => P[y] - P[x] || W[y] - W[x] || D[y] - D[x] || F[y] - F[x] || jitter[y] - jitter[x]);
     for (let p = 0; p < n; p++) posCount[order[p] * n + p]++;
     for (let i = 0; i < n; i++) ptsSum[i] += P[i];
+    if (vg) cuts[libertadoresCut(order, rows, vg, zones?.zStart, vrand)]++;
   }
 
   const out = new Map();
@@ -399,9 +433,13 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
     for (let p = 1; p <= (zones?.g || 0); p++) g += at(p);
     let z = 0;
     if (zones?.zStart) for (let p = zones.zStart; p <= n; p++) z += at(p);
-    out.set(r.id, { title: at(1), g, z, pts: ptsSum[i] / runs });
+    const cum = [];
+    for (let p = 1, s = 0; p <= n; p++) cum.push((s += at(p)));
+    out.set(r.id, { title: at(1), g, z, pts: ptsSum[i] / runs, cum });
   });
-  return { byId: out, runs, left: left.length + live.length };
+  const dist = {};
+  cuts.forEach((c, k) => { if (c) dist[k] = c / runs; });
+  return { byId: out, runs, left: left.length + live.length, vagas: vg ? { base: vg.base, finalists: vg.finalists, dist } : null };
 }
 
 // Resultado testado em cada jogo do secador: vitória do mandante, empate, vitória do visitante.

@@ -46,7 +46,7 @@ export function openPhase(phases) {
  * phases: fases da competição (phasesOf); comp: a competição (finalSingle: final em jogo único, em campo neutro);
  * lambda(homeId, awayId, neutral) -> [gols esperados do mandante, do visitante], ou null sem força conhecida.
  * spread: incerteza da força (desvio do log do ataque e da defesa, sorteado a cada simulação).
- * Devolve {phase, ties: [{key, a, b, p: {id: chance de passar}}], byTeam: Map id -> {next, final, title}, runs}
+ * Devolve {phase, ties: [{key, a, b, p: {id: chance de passar}}], byTeam: Map id -> {next, final, title}, finals, runs}
  * ou null (mata-mata encerrado, confronto indefinido ou time sem força conhecida).
  */
 export function knockoutOdds({ phases, comp, lambda, runs = 10000, seed = 5, spread = 0.05 }) {
@@ -87,6 +87,9 @@ export function knockoutOdds({ phases, comp, lambda, runs = 10000, seed = 5, spr
   const fin = new Map(teams.map((id) => [id, 0]));
   const title = new Map(teams.map((id) => [id, 0]));
   const tieWins = ties.map(() => 0);
+  // Os dois finalistas de cada sorteio (na Copa do Brasil, os dois levam vaga na Libertadores).
+  const pairs = new Map();
+  const addPair = (x, y) => { const k = [x, y].sort().join('|'); pairs.set(k, (pairs.get(k) || 0) + 1); };
   for (let s = 0; s < runs; s++) {
     for (const id of teams) { ea.set(id, Math.exp(spread * gauss(rand))); ed.set(id, Math.exp(spread * gauss(rand))); }
     // Fase em aberto: o que já foi jogado vale; jogo ao vivo, só o que falta; o resto é sorteado.
@@ -122,8 +125,9 @@ export function knockoutOdds({ phases, comp, lambda, runs = 10000, seed = 5, spr
     // Fases seguintes: os vencedores se cruzam (sorteio, como na Copa do Brasil), até sobrar o campeão.
     let left = alive;
     if (finalHere) for (const id of teams) if (ties.some((t) => t.a.id === id || t.b.id === id)) fin.set(id, fin.get(id) + 1);
+    if (finalHere && ties.length === 1) addPair(ties[0].a.id, ties[0].b.id);
     while (left.length > 1) {
-      if (isFinal(left.length)) for (const id of left) fin.set(id, fin.get(id) + 1);
+      if (isFinal(left.length)) { for (const id of left) fin.set(id, fin.get(id) + 1); addPair(left[0], left[1]); }
       const pool = [...left];
       for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
       const won = [];
@@ -142,6 +146,8 @@ export function knockoutOdds({ phases, comp, lambda, runs = 10000, seed = 5, spr
     final: finalHere,
     ties: ties.map((t, k) => ({ key: t.key, a: t.a, b: t.b, done: t.done, p: { [t.a.id]: tieWins[k] / runs, [t.b.id]: 1 - tieWins[k] / runs } })),
     byTeam,
+    // Chance de cada final: "id1|id2" (em ordem) -> chance.
+    finals: new Map([...pairs].map(([k, c]) => [k, c / runs])),
     runs,
   };
 }

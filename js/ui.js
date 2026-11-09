@@ -817,27 +817,56 @@ export function miniTable(sim, real, zones, favorite) {
     }).join('')}</tbody></table>`;
 }
 
+/**
+ * Vagas na Libertadores com as copas (chances().vagas): as posições que vale mostrar, da que já está garantida
+ * (from) até a última que ainda pode ter vaga (to), e atLeast(k), a chance de a vaga chegar até a posição k.
+ */
+export function vagasRange(v) {
+  if (!v?.dist) return null;
+  const ks = Object.keys(v.dist).map(Number);
+  const atLeast = (k) => ks.filter((c) => c >= k).reduce((s, c) => s + v.dist[c], 0);
+  let from = v.base;
+  while (atLeast(from + 1) >= 0.995) from++;
+  let to = from;
+  while (atLeast(to + 1) >= 0.005) to++;
+  return { from, to, atLeast };
+}
+
+/** De onde vêm as vagas a mais, pelas regras do ano (vagas.js). */
+export function vagasNote(v) {
+  const who = v.finalists ? 'cada finalista da Copa do Brasil e cada campeão da Libertadores ou da Sul-Americana' : 'o campeão da Copa do Brasil, da Libertadores ou da Sul-Americana';
+  return `O Brasileirão garante o G${v.base}. Abre mais uma vaga ${who} que também terminar na zona, e quem leva vaga por uma copa e cai (clube da Série B não joga a Libertadores).`;
+}
+
 function oddsTable(sim, odds, base, zones, favorite) {
-  const cols = [['title', 'Título']];
-  if (zones.g) cols.push(['g', zones.gLabel]);
-  if (zones.zStart) cols.push(['z', zones.zLabel]);
-  const cell = (key, o, b) => {
-    const p = o[key];
-    const diff = b ? Math.round((p - b[key]) * 100) : 0;
+  const vr = vagasRange(odds.vagas);
+  const cols = [['title', 'Título', (o) => o.title]];
+  // Com as copas, uma coluna para cada cenário de vagas na Libertadores (G6, G7…): chance de terminar até ali.
+  if (vr) for (let k = vr.from; k <= vr.to; k++) cols.push(['g', `G${k}`, (o) => o.cum?.[k - 1] ?? 0, k]);
+  else if (zones.g) cols.push(['g', zones.gLabel, (o) => o.g]);
+  if (zones.zStart) cols.push(['z', zones.zLabel, (o) => o.z]);
+  const many = vr && vr.to > vr.from;
+  const cell = ([key, , get], o, b) => {
+    const p = get(o);
+    const diff = b ? Math.round((p - get(b)) * 100) : 0;
     return `<td class="odd odd-${key}" style="--f:${p.toFixed(3)}"><span>${pct(p)}</span>${diff ? `<small class="${diff > 0 ? 'up-text' : 'down-text'}">${diff > 0 ? '+' : ''}${diff}</small>` : ''}</td>`;
   };
-  return `<div class="table-wrap"><table class="odds-table">
-    <thead><tr><th class="club">Clube</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th title="Pontos esperados no fim">Pts</th></tr></thead>
+  // Embaixo de cada coluna de vaga, a chance de o cenário acontecer (a vaga chegar até aquela posição). Com as
+  // colunas de vaga, os pontos esperados saem da tabela (ficam na página do time) para ela caber no celular.
+  const foot = many ? `<tfoot><tr><th class="club">Chance de ter a vaga</th>${cols.map(([, , , k]) => `<td>${k ? pct(vr.atLeast(k)) : ''}</td>`).join('')}</tr></tfoot>` : '';
+  return `<div class="table-wrap"><table class="odds-table${many ? ' many' : ''}">
+    <thead><tr><th class="club">Clube</th>${cols.map(([, l]) => `<th>${esc(l)}</th>`).join('')}${many ? '' : '<th title="Pontos esperados no fim">Pts</th>'}</tr></thead>
     <tbody>${sim.rows.map((t) => {
       const o = odds.byId.get(t.id);
       if (!o) return '';
       const b = base?.byId.get(t.id);
       return `<tr data-team="${esc(t.id)}"${t.id === favorite ? ' class="is-fav"' : ''}>
         <td class="club"><span class="club-cell"><span class="pos-n">${t.pos}</span>${crest(t.logo, t.name, 18, 'mini')}<span class="club-name">${esc(t.name)}</span></span></td>
-        ${cols.map(([k]) => cell(k, o, b)).join('')}
-        <td class="pts">${Math.round(o.pts)}</td>
+        ${cols.map((c) => cell(c, o, b)).join('')}
+        ${many ? '' : `<td class="pts">${Math.round(o.pts)}</td>`}
       </tr>`;
-    }).join('')}</tbody></table></div>`;
+    }).join('')}</tbody>${foot}</table></div>
+    ${many ? `<p class="chart-note">G${vr.from} a G${vr.to}: chance de cada time terminar até aquela posição. Na última linha, a chance de a vaga na Libertadores chegar até lá. ${esc(vagasNote(odds.vagas))}</p>` : ''}`;
 }
 
 // Jogos encerrados não se simulam: uma linha cada, recolhidos.
@@ -905,6 +934,8 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const hhmm = (t) => (t ? fmtTime.format(new Date(t)) : '');
 
+const CUP_NAMES = { 'bra.copa_do_brazil': 'Copa do Brasil', 'conmebol.libertadores': 'Libertadores', 'conmebol.sudamericana': 'Sul-Americana' };
+
 export function diagSheet(d) {
   const row = (ok, label, text) => `<li class="diag-${ok === null ? 'wait' : ok ? 'ok' : 'bad'}"><b>${ok === null ? '…' : ok ? '✓' : '!'}</b><span><strong>${esc(label)}</strong><small>${esc(text)}</small></span></li>`;
   const s = d.season;
@@ -926,6 +957,13 @@ export function diagSheet(d) {
     : !c ? 'aguardando a classificação oficial'
       : fixes.length ? `pontos ajustados em ${fixes.length} ${fixes.length === 1 ? 'time' : 'times'} (${fixes.map(([id, p]) => `${d.names.get(id) || id} ${p > 0 ? '+' : ''}${p}`).join(', ')})`
         : `${c.checked} times conferidos, pontos iguais${c.ahead ? `; ${c.ahead} com jogo que a ESPN ainda não contou` : ''}`;
+  // Copa do Brasil, Libertadores e Sul-Americana, lidas para saber quantas vagas a tabela ganha.
+  const cups = Object.entries(d.cups || {});
+  const cupsBad = cups.filter(([, x]) => !x.ok);
+  const vr = vagasRange(d.vagas);
+  const vagasText = cupsBad.length ? cupsBad.map(([slug, x]) => `${CUP_NAMES[slug] || slug} falhou às ${hhmm(x.t)}: ${x.error}`).join('; ')
+    : vr ? `${vr.to > vr.from ? `cenários de G${vr.from} a G${vr.to}` : `G${vr.from} já definido`}${cups.length ? `; copas lidas às ${hhmm(Math.max(...cups.map(([, x]) => x.t)))}` : ', com as copas salvas no celular'}`
+      : d.mode !== 'jogos' ? 'precisa de todos os jogos da temporada' : 'aguardando as copas (ou o mata-mata sem confrontos definidos)';
   const items = [
     row(s ? !s.error && (s.count > 0 || !s.full) && !s.failed.length : null, 'Jogos da temporada', seasonText),
     row(st ? st.ok : null, 'Classificação oficial da ESPN', !st ? 'ainda não carregou' : st.ok ? `${st.count} times às ${hhmm(st.t)}` : `falhou às ${hhmm(st.t)}: ${st.error}`),
@@ -935,6 +973,7 @@ export function diagSheet(d) {
       : d.roundsMethod === 'espelho' ? `${d.rounds} montadas pelo espelho turno/returno, com os jogos remarcados na rodada certa; atual: ${d.focus}`
         : `${d.rounds} montadas pelas datas (${d.roundsWhy}); jogos remarcados podem ficar fora da rodada; atual: ${d.focus}`),
     row(d.mode === 'jogos' ? d.odds || null : false, 'Chances até o fim', d.mode !== 'jogos' ? 'precisa de todos os jogos da temporada' : d.odds ? 'calculadas' : 'calculando'),
+    row(cupsBad.length ? false : vr ? true : null, 'Vagas na Libertadores pelas copas', vagasText),
     row(d.priorTeams ? true : d.prior?.error || d.prior?.failed?.length ? false : null, 'Temporada anterior (ponto de partida das chances)', d.priorTeams
       ? `força de ${d.priorTeams} times${d.prior ? ` às ${hhmm(d.prior.t)}` : ', salva no celular'}`
       : d.prior?.error ? `falhou às ${hhmm(d.prior.t)}: ${d.prior.error}; as chances usam só esta temporada`

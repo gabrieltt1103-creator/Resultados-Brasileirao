@@ -24,6 +24,12 @@ export async function getJSON(url, timeout = 15e3) {
 }
 
 export const fetchScoreboard = (range, limit = 300, timeout) => getJSON(range ? `${SCOREBOARD}?dates=${range}&limit=${limit}` : SCOREBOARD, timeout);
+
+// Outras competições (Copa do Brasil, Libertadores, estaduais…): a ESPN tem um endereço por competição.
+const SITE = `${BASE}/site/v2/sports/soccer`;
+export const fetchCompYear = (slug, year) => getJSON(`${SITE}/${slug}/scoreboard?dates=${year}&limit=1000`, 25e3);
+export const fetchCompDay = (slug, d) => getJSON(`${SITE}/${slug}/scoreboard?dates=${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}&limit=100`, 12e3);
+export const fetchCompStandings = (slug, year) => getJSON(`${BASE}/v2/sports/soccer/${slug}/standings?season=${year}`, 12e3);
 export const fetchStandings = () => getJSON(STANDINGS, 12e3);
 export const fetchSummary = (id) => getJSON(`${SUMMARY}?event=${encodeURIComponent(id)}`);
 
@@ -102,6 +108,9 @@ export function parseEvent(e) {
     color2: hexColor(x?.team?.alternateColor),
     score: x?.score == null || x.score === '' ? null : Number(x.score),
     stats: statMap(x?.statistics),
+    // Mata-mata: pênaltis e quem avançou; time ainda indefinido (final com "TBD Home").
+    pens: x?.shootoutScore == null ? null : Number(x.shootoutScore),
+    tbd: /^TBD\b/i.test(x?.team?.displayName || ''),
   });
   const home = side(comps.find((x) => x.homeAway === 'home') || comps[0]);
   const away = side(comps.find((x) => x.homeAway === 'away') || comps[1]);
@@ -110,6 +119,8 @@ export function parseEvent(e) {
   const details = Array.isArray(c.details) ? c.details : [];
   const incidents = [];
   for (const d of details) {
+    // Cobranças da disputa de pênaltis não são gols do jogo.
+    if (d.shootout) continue;
     const kind = d.scoringPlay ? 'goal' : d.redCard ? 'red' : d.yellowCard ? 'yellow' : null;
     if (!kind) continue;
     const a = d.athletesInvolved?.[0];
@@ -138,6 +149,13 @@ export function parseEvent(e) {
     if (!fits()) flip();
   }
 
+  // Fase (pela ESPN: "group-stage", "semifinals"…), jogo de ida ou volta e o confronto (agregado, quem passou).
+  const series = c.series ? {
+    done: !!c.series.completed,
+    agg: Object.fromEntries((c.series.competitors || []).filter((x) => x.aggregateScore != null).map((x) => [String(x.id), Number(x.aggregateScore)])),
+    winner: (c.series.competitors || []).find((x) => x.winner)?.id != null ? String(c.series.competitors.find((x) => x.winner).id) : null,
+  } : null;
+
   return {
     id: String(e.id),
     date,
@@ -147,7 +165,19 @@ export function parseEvent(e) {
     incidents,
     goalsComplete: fits(),
     venue: [c.venue?.fullName, c.venue?.address?.city].filter(Boolean).join(' · '),
+    phase: e.season?.slug || '',
+    leg: c.leg?.value || null,
+    series,
   };
+}
+
+/** Grupos (ou a tabela única) de uma competição: [{name, rows}], cada linha como em parseStandings. */
+export function parseGroups(json) {
+  const groups = json?.children?.length ? json.children : json?.standings ? [{ name: '', standings: json.standings }] : [];
+  return groups.map((g) => ({
+    name: String(g.name || g.abbreviation || '').replace(/^Group\s+/i, 'Grupo ').replace(/^League Phase$/i, 'Fase de liga'),
+    rows: parseStandings({ standings: g.standings }),
+  })).filter((g) => g.rows.length);
 }
 
 export const seasonYear = (json) => json?.leagues?.[0]?.season?.year || json?.events?.[0]?.season?.year || null;

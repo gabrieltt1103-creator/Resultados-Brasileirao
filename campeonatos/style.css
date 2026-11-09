@@ -1266,6 +1266,17 @@ details[open] > summary::before { transform: rotate(45deg); }
 .odds-table td.odd-title::before { background: var(--gol); }
 .odds-table td.odd-g::before { background: var(--good); }
 .odds-table td.odd-z::before { background: var(--live); }
+/* Com os cenários de vaga na Libertadores (G6 a G9), colunas mais estreitas e a linha da chance de cada cenário. */
+.odds-table.many { font-size: 11.5px; }
+.odds-table.many th, .odds-table.many td { padding-inline: 1.5px; }
+.odds-table.many thead th { font-size: 11.5px; letter-spacing: 0.02em; }
+.odds-table.many td.odd { min-width: 0; }
+.odds-table.many td.odd::before { left: 2px; width: calc((100% - 4px) * var(--f, 0)); }
+.odds-table.many .pos-n { width: 15px; font-size: 12px; }
+.odds-table.many .club-cell { gap: 4px; }
+.odds-table.many .club-name { max-width: 58px; }
+.odds-table tfoot th, .odds-table tfoot td { padding-block: 8px; border-top: 2px solid var(--line); font-weight: 700; font-size: 13px; }
+.odds-table tfoot th { white-space: normal; line-height: 1.2; font-family: inherit; letter-spacing: 0; color: var(--ink); border-bottom: 0; }
 .odds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .odds div { display: grid; justify-items: center; gap: 2px; padding: 8px 4px; border-radius: 8px; background: var(--surface-2); text-align: center; }
 .odds span { font-size: 11px; color: var(--muted); font-weight: 600; }

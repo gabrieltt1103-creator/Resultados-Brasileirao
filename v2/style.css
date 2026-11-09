@@ -331,6 +331,20 @@ main { padding-top: 10px; }
 .v2-orow .d { text-align: right; font: 700 11px/1 var(--body); }
 .v2-orow .d.good { color: var(--good); }
 .v2-orow .d.bad { color: var(--live); }
+.v2-gtab { width: 100%; border-collapse: collapse; font: 600 14px/1.1 var(--body); font-variant-numeric: tabular-nums; }
+.v2-gtab th, .v2-gtab td { padding: 7px 3px; text-align: right; white-space: nowrap; }
+.v2-gtab thead th { font: 700 11px/1 var(--body); letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--line); }
+.v2-gtab .tn { text-align: left; }
+.v2-gtab .tnw { display: flex; align-items: center; gap: 8px; max-width: 150px; }
+.v2-gtab .tnw span { overflow: hidden; text-overflow: ellipsis; }
+.v2-gtab thead th.tn { font-weight: 600; letter-spacing: 0; text-transform: none; }
+.v2-gtab tbody tr { cursor: pointer; }
+.v2-gtab tbody tr + tr td { border-top: 1px solid var(--line); }
+.v2-gtab td small { display: block; margin-top: 2px; font-size: 10.5px; font-weight: 700; }
+.v2-gtab small.good { color: var(--good); }
+.v2-gtab small.bad { color: var(--live); }
+.v2-gtab tfoot th, .v2-gtab tfoot td { padding-top: 9px; border-top: 2px solid var(--line); font-weight: 800; }
+.v2-gtab tfoot th { white-space: normal; font-weight: 700; font-size: 13px; }
 
 /* Números */
 .v2-big3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }

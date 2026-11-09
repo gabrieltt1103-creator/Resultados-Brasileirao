@@ -2,10 +2,11 @@ import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
 import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
-import { PROMOTED, chances, expectedGoals, matchPicks, model, priorFrom, secador, suggestScore } from './sim.js';
+import { PROMOTED, chances, matchPicks, model, priorFrom, secador, suggestScore } from './sim.js';
 import { COMPS, CUPS, SMALL, compByKey, compOf, dropStale, formatsFor, involves, phaseLabel, phasesOf, pickPhase, tiesOf } from './comps.js';
 import { knockoutOdds, openPhase } from './knockout.js';
 import { formatFits, stateOdds } from './estadual.js';
+import { CONT, FOREIGN, VAGAS_CUPS, continentalModel, lambdaOf, vagasInput } from './vagas.js';
 import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import { coachFits, fetchCoaches } from './coach.js';
@@ -46,8 +47,6 @@ const CUP_MS = 30 * 60e3;           // competição com jogo nos próximos dias:
 const CUP_IDLE_MS = 12 * HOUR;      // sem jogo por perto
 const GROUPS_MS = 5 * 60e3;
 const CUP_RUNS = 10000;
-// Estrangeiros (Libertadores, Sul-Americana) começam abaixo da média brasileira: testado de 2018 a 2025.
-const FOREIGN = { att: 0.85, def: 1.15 };
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -653,7 +652,6 @@ async function loadGroups(slug) {
 
 // Força dos estrangeiros: jogos da Libertadores e da Sul-Americana do ano anterior (os deste ano já estão
 // carregados), lidos uma vez por ano e guardados no celular.
-const CONT = ['conmebol.libertadores', 'conmebol.sudamericana'];
 function contCached(year) {
   const c = store(CONT_KEY, null);
   return c?.year === year && Array.isArray(c.events) ? c.events.map((e) => ({ ...e, date: new Date(e.date) })) : null;
@@ -684,18 +682,9 @@ async function loadContPast() {
     state.contPast = events;
     save(CONT_KEY, { year, events: events.map((e) => ({ ...e, date: +e.date })) });
     state.cupOdds.clear();
-    render();
+    refresh();
   } catch { /* tenta de novo mais tarde */ }
 }
-
-// Gols esperados de um jogo pelo modelo (em campo neutro: a média de jogar em casa e fora). Null sem força.
-const lambdaOf = (m) => (h, a, neutral) => {
-  if (!m?.att.has(h) || !m.att.has(a)) return null;
-  const [x1, y1] = expectedGoals(m, h, a);
-  if (!neutral) return [x1, y1];
-  const [y2, x2] = expectedGoals(m, a, h);
-  return [Math.sqrt(x1 * x2), Math.sqrt(y1 * y2)];
-};
 
 /**
  * Modelo de força para uma competição: o do Brasileirão (clubes da Série A); na Libertadores e na
@@ -713,10 +702,7 @@ function cupModel(slug) {
   // Refeito só quando entra jogo encerrado ou chega a força da temporada anterior.
   const key = `${games.filter((e) => e.status.kind === 'post').length}|${!!state.prior}`;
   if (contMemo.key === key) return contMemo.m;
-  const ids = new Set(games.flatMap((e) => [e.home.id, e.away.id]));
-  const ours = serieA();
-  const prior = new Map([...ids].map((id) => [id, ours.has(id) ? state.prior?.get(id) || (state.prior ? PROMOTED : { att: 1, def: 1 }) : FOREIGN]));
-  contMemo = { key, m: model(new Map([...ids].map((id) => [id, { id }])), games, prior) };
+  contMemo = { key, m: continentalModel(games, serieA(), state.prior) };
   return contMemo.m;
 }
 
@@ -921,18 +907,30 @@ function inWorker(input, local) {
   });
 }
 
-function runOdds(finished, events, overrides) {
-  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS, prior: priorList() };
+function runOdds(finished, events, overrides, vagas) {
+  const input = { kind: 'odds', finished: [...finished.values()], events: events.map(compactEvent), overrides, zones: { g: state.zones.g, zStart: state.zones.zStart }, runs: ODDS_RUNS, prior: priorList(), vagas };
   return inWorker(input, () => {
     const out = chances({ ...input, finished, prior: state.prior });
-    return out ? { byId: [...out.byId], runs: out.runs, left: out.left } : null;
+    return out ? { byId: [...out.byId], runs: out.runs, left: out.left, vagas: out.vagas } : null;
   });
+}
+
+// O que as copas dão de vaga na Libertadores (vagas.js), pelas chances do mata-mata de cada uma.
+function vagasNow() {
+  if (state.table?.mode !== 'jogos') return null;
+  const cups = Object.fromEntries(VAGAS_CUPS.map((slug) => [slug, { phases: state.cups[slug]?.phases || [], odds: cupOddsOf(slug) }]));
+  try {
+    return vagasInput({ year: new Date().getFullYear(), cups, ours: serieA() });
+  } catch (err) {
+    state.diag.errors.push({ part: 'vagas na Libertadores', error: errText(err), t: Date.now() });
+    return null;
+  }
 }
 
 const priorList = () => (state.prior ? [...state.prior] : null);
 
 let oddsToken = 0;
-const asOdds = (r) => (r ? { byId: new Map(r.byId), runs: r.runs, left: r.left } : null);
+const asOdds = (r) => (r ? { byId: new Map(r.byId), runs: r.runs, left: r.left, vagas: r.vagas || null } : null);
 
 function scheduleOdds(delay = 30) {
   const t = state.table;
@@ -940,7 +938,9 @@ function scheduleOdds(delay = 30) {
   const list = eventList();
   const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
   const done = list.filter((e) => e.status.kind === 'post').length;
-  const baseSig = `${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}`;
+  const vagas = vagasNow();
+  const vagasSig = vagas ? vagas.cups.map((c) => c.map((x) => `${x.ids.join('+')}:${x.p.toFixed(3)}`).join(',')).join('/') : '';
+  const baseSig = `${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}|${vagasSig}`;
   const sig = `${baseSig}|${JSON.stringify(state.sims)}`;
   if (sig === state.oddsSig) return;
   clearTimeout(state.oddsTimer);
@@ -949,12 +949,12 @@ function scheduleOdds(delay = 30) {
     try {
       const sims = { ...state.sims };
       if (baseSig !== state.oddsBaseSig) {
-        const base = asOdds(await runOdds(t.finished, list, {}));
+        const base = asOdds(await runOdds(t.finished, list, {}, vagas));
         if (token !== oddsToken) return;
         state.oddsBase = base;
         state.oddsBaseSig = baseSig;
       }
-      const odds = Object.keys(sims).length ? asOdds(await runOdds(t.finished, list, sims)) : state.oddsBase;
+      const odds = Object.keys(sims).length ? asOdds(await runOdds(t.finished, list, sims, vagas)) : state.oddsBase;
       if (token !== oddsToken) return;
       state.odds = odds;
       state.oddsSig = sig;
@@ -1065,8 +1065,9 @@ function safe(part, fn, container) {
 }
 
 function refresh() {
-  safe('a rodada', derive, el.matches);
+  // As fases das copas vêm antes: as chances do Brasileirão usam as vagas que elas dão na Libertadores.
   safe('as competições', deriveCups);
+  safe('a rodada', derive, el.matches);
   render();
 }
 

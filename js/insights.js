@@ -1,5 +1,5 @@
 // Leitura da rodada: histórias de cada jogo, manchetes e números.
-import { formOf, formPoints } from './table.js';
+import { formOf, formPoints, tieBreaks } from './table.js';
 import { ao, doo, kickoff, o, plural, scoreText } from './util.js';
 
 const started = (e) => (e.status.kind === 'post' || e.status.kind === 'live') && e.home.score != null && e.away.score != null;
@@ -261,11 +261,16 @@ export function impactLines({ before, after, zones, favorite }) {
   const items = [];
   const add = (prio, tag, text, tone) => items.push({ prio, tag, text, tone });
   const lead = after.rows[0];
-  if (before.rows[0].id !== lead.id) add(10, 'Líder', `${lead.name} assume a liderança`, 'good');
-  else {
-    const gap = lead.pts - after.rows[1].pts;
-    add(3, 'Líder', `${lead.name} segue líder, ${gap} ${gap === 1 ? 'ponto' : 'pontos'} à frente ${doo(after.rows[1].name)}`, 'good');
-  }
+  const second = after.rows[1];
+  const gap = lead.pts - second.pts;
+  // Mesmos pontos do segundo: o que desempata ("empatado em pontos com o Palmeiras, com mais vitórias (26 a 25)").
+  const tb = gap === 0 ? tieBreaks(after.rows).get(lead.id)?.find((x) => x.other.id === second.id) : null;
+  const sg = (n) => (n > 0 ? `+${n}` : String(n));
+  const why = !tb ? '' : tb.key === 'w' ? `com mais vitórias (${lead.w} a ${second.w})` : tb.key === 'gd' ? `com saldo de gols melhor (${sg(lead.gd)} a ${sg(second.gd)})`
+    : tb.key === 'gf' ? `com mais gols pró (${lead.gf} a ${second.gf})` : 'pelo confronto direto ou pelos cartões';
+  const tied = tb ? `, empatado em pontos com ${o(second.name)}, ${why}` : '';
+  if (before.rows[0].id !== lead.id) add(10, 'Líder', `${lead.name} assume a liderança${tied}`, 'good');
+  else add(3, 'Líder', tb ? `${lead.name} segue líder${tied}` : `${lead.name} segue líder, ${gap} ${gap === 1 ? 'ponto' : 'pontos'} à frente ${doo(second.name)}`, 'good');
   const zone = (limit, inside, label, tone) => {
     if (!limit) return;
     for (const r of after.rows) {

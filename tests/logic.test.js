@@ -681,3 +681,27 @@ test('leitura ao vivo nos primeiros minutos: começo de jogo, sem "esfriou"', ()
   const ht = game("47'");
   assert.equal(matchReading(ht, { plays: late, flow: matchFlow(late, liveClock(ht)) }).at(-1), 'O segundo tempo acabou de começar.');
 });
+
+test('desempate: o critério que separa times com os mesmos pontos, na tabela e na frase do líder', async () => {
+  const { tieBreaks } = await import('../js/table.js');
+  const { tieTitle, standingsTable, miniTable } = await import('../js/ui.js');
+  const row = (id, name, pts, w, gd, gf) => ({ id, name, logo: '', pts, w, gd, gf, gp: 38, d: 0, l: 0, ga: gf - gd, pos: 0 });
+  const rows = [row('F', 'Flamengo', 85, 26, 48, 78), row('P', 'Palmeiras', 85, 25, 45, 68), row('S', 'São Paulo', 48, 13, -1, 41), row('B', 'Botafogo', 48, 13, -7, 50),
+    row('I', 'Internacional', 44, 11, -4, 40), row('C', 'Corinthians', 44, 11, -4, 38), row('M', 'Mirassol', 40, 10, -8, 30), row('R', 'Remo', 40, 10, -8, 30)];
+  rows.forEach((r, i) => { r.pos = i + 1; });
+  const ties = tieBreaks(rows);
+  assert.deepEqual(['F', 'P', 'S', 'B', 'I', 'C', 'M', 'R'].map((id) => ties.get(id)[0].key), ['w', 'w', 'gd', 'gd', 'gf', 'gf', 'order', 'order']);
+  assert.equal(tieTitle(rows[0], ties.get('F')[0]), 'Mesmos pontos que o Palmeiras: fica à frente por ter mais vitórias (26 a 25).');
+  assert.equal(tieTitle(rows[3], ties.get('B')[0]), 'Mesmos pontos que o São Paulo: fica atrás por ter pior saldo de gols (-7 a -1).');
+  // Na tabela, o número sublinhado é o do critério (V, SG, GP; P quando vale o confronto direto).
+  const table = { rows, byId: new Map(rows.map((r) => [r.id, r])) };
+  const zones = { byPos: [] };
+  const html = standingsTable({ table, zones, formById: new Map(), favorite: null }).html;
+  assert.equal((html.match(/class="tb"|class="pts tb"/g) || []).length, 8);
+  assert.match(standingsTable({ table, zones, formById: new Map(), favorite: null }).legend, /Desempate: 1º vitórias, 2º saldo de gols, 3º gols pró/);
+  assert.equal((miniTable(table, table, zones, null).match(/class="(pts )?tb"/g) || []).length, 8);
+  // Líder empatado em pontos: a frase diz o que desempata, sem "0 pontos à frente".
+  const before = { rows: [...rows], byId: table.byId };
+  const lines = impactLines({ before, after: { rows, byId: table.byId }, zones: { g: 0 }, favorite: null });
+  assert.equal(lines.find((l) => l.tag === 'Líder').text, 'Flamengo segue líder, empatado em pontos com o Palmeiras, com mais vitórias (26 a 25)');
+});

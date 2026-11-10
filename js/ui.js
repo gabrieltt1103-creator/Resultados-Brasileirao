@@ -1,6 +1,6 @@
 // Montagem do HTML de cada parte da tela. Funções puras: recebem dados, devolvem texto.
 import { bucketLabels, h2hSummary, storyTags } from './insights.js';
-import { distances, formPoints } from './table.js';
+import { TIE_RULES, distances, formPoints, tieBreaks } from './table.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, shortDay, weekdayShort } from './util.js';
 
 const ord = (n) => (n ? `${n}º` : '');
@@ -216,31 +216,68 @@ export function secadorCard({ on, team, summary, rivals = [], past = false }) {
   </section>`;
 }
 
+// Por que o time fica à frente (ou atrás) de quem tem os mesmos pontos: "Mesmos pontos que o Santos: fica à
+// frente por ter mais vitórias (13 a 12)."
+export function tieTitle(t, b) {
+  const x = b.other;
+  if (b.key === 'order') return `Mesmos pontos, vitórias, saldo e gols pró que ${o(x.name)}: fica ${b.ahead ? 'à frente' : 'atrás'} pelo confronto direto ou pelos cartões (ordem oficial).`;
+  const sg = (n) => (n > 0 ? `+${n}` : String(n));
+  const [mine, theirs] = b.key === 'gd' ? [sg(t.gd), sg(x.gd)] : [t[b.key], x[b.key]];
+  const more = { w: ['mais vitórias', 'menos vitórias'], gd: ['melhor saldo de gols', 'pior saldo de gols'], gf: ['mais gols pró', 'menos gols pró'] }[b.key][b.ahead ? 0 : 1];
+  return `Mesmos pontos que ${o(x.name)}: fica ${b.ahead ? 'à frente' : 'atrás'} por ter ${more} (${mine} a ${theirs}).`;
+}
+
+// Os critérios de desempate, em ordem, e o que o sublinhado quer dizer quando há times com os mesmos pontos.
+function tiesLegend(ties) {
+  const all = [...ties.values()].flat();
+  const order = all.some((b) => b.key === 'order') ? ' No P, empate também em vitórias, saldo e gols pró: vale o confronto direto (ou os cartões).' : '';
+  return `Desempate: ${TIE_RULES.map((r, i) => `${i + 1}º ${r}`).join(', ')}.${all.length ? ` Sublinhado: o número que separa times com os mesmos pontos.${order}` : ''}`;
+}
+export const tieNote = (ties) => `<li class="tb-note">${esc(tiesLegend(ties))}</li>`;
+/** Linha com os critérios de desempate para pôr embaixo de uma tabela (a do simulador). */
+export const tieLine = (rows) => `<p class="tb-line">${esc(tiesLegend(tieBreaks(rows)))}</p>`;
+
 /** Tabela de classificação. */
 export function standingsTable({ table, zones, formById, favorite }) {
   const legend = new Map();
+  const ties = tieBreaks(table.rows);
+  // Colunas na ordem de costume; o desempate aparece no número que separa os empatados (P: confronto direto).
+  const cols = [
+    ['pts', 'P', 'Pontos', (t) => t.pts],
+    ['gp', 'J', 'Jogos', (t) => t.gp],
+    ['w', 'V', 'Vitórias', (t) => t.w],
+    ['d', 'E', 'Empates', (t) => t.d],
+    ['l', 'D', 'Derrotas', (t) => t.l],
+    ['gf', 'GP', 'Gols pró', (t) => t.gf],
+    ['ga', 'GC', 'Gols contra', (t) => t.ga],
+    ['gd', 'SG', 'Saldo de gols', (t) => (t.gd > 0 ? `+${t.gd}` : t.gd)],
+    ['pct', '%', 'Aproveitamento', (t) => (t.gp ? Math.round((t.pts / (t.gp * 3)) * 100) : 0)],
+  ];
+  const TIE_COL = { w: 'w', gd: 'gd', gf: 'gf', order: 'pts' };
   const body = table.rows.map((t) => {
     const zone = zones.byPos[t.pos];
     if (zone && !legend.has(zone.name)) legend.set(zone.name, zone.color);
     const r = t.result;
     const live = r?.live ? '<span class="pulse" title="Jogando agora"></span>' : '';
     const res = r ? `<span class="res res-${r.res}" title="${esc(`${r.gf} x ${r.ga} contra ${r.opp.name}${r.live ? ', em andamento' : ''}`)}">${r.res}</span>` : '';
-    const gd = t.gd > 0 ? `+${t.gd}` : t.gd;
-    const pct = t.gp ? Math.round((t.pts / (t.gp * 3)) * 100) : 0;
+    const mine = ties.get(t.id) || [];
+    const cells = cols.map(([key, , , get]) => {
+      const tb = mine.filter((b) => TIE_COL[b.key] === key);
+      const cls = [key === 'pts' ? 'pts' : '', tb.length ? 'tb' : ''].filter(Boolean).join(' ');
+      return `<td${cls ? ` class="${cls}"` : ''}${tb.length ? ` title="${esc(tb.map((b) => tieTitle(t, b)).join(' '))}"` : ''}>${get(t)}</td>`;
+    }).join('');
     return `<tr data-team="${esc(t.id)}"${t.id === favorite ? ' class="is-fav"' : ''}>
       <td class="pos"${zone ? ` style="--zone:${esc(zone.color)}"` : ''}><span class="pos-n">${t.pos}</span>${moveChip(t.delta)}</td>
-      <td class="club"><span class="club-cell">${crest(t.logo, t.name, 20, 'mini')}<span class="club-name">${esc(t.name)}</span>${t.id === favorite ? star : ''}${res}${live}</span></td>
-      <td class="pts">${t.pts}</td><td>${t.gp}</td><td>${t.w}</td><td>${t.d}</td><td>${t.l}</td><td>${gd}</td><td>${t.gf}</td><td>${t.ga}</td><td>${pct}</td>
+      <td class="club"><span class="club-cell">${crest(t.logo, t.name, 20, 'mini')}<span class="club-name" title="${esc(t.name)}">${esc(t.name)}</span>${t.id === favorite ? star : ''}${res}${live}</span></td>
+      ${cells}
       <td class="form-col">${formDots(formById.get(t.id))}</td>
     </tr>`;
   }).join('');
   const head = `<thead><tr>
-    <th class="pos">#</th><th class="club">Clube</th><th title="Pontos">P</th><th title="Jogos">J</th><th title="Vitórias">V</th>
-    <th title="Empates">E</th><th title="Derrotas">D</th><th title="Saldo de gols">SG</th><th title="Gols pró">GP</th>
-    <th title="Gols contra">GC</th><th title="Aproveitamento">%</th><th class="form-col">Últimos 5</th></tr></thead>`;
+    <th class="pos">#</th><th class="club">Clube</th>${cols.map(([, label, title]) => `<th title="${esc(title)}">${esc(label)}</th>`).join('')}<th class="form-col">Últimos 5</th></tr></thead>`;
   return {
     html: `<table class="standings">${head}<tbody>${body}</tbody></table>`,
-    legend: [...legend].map(([name, color]) => `<li style="--zone:${esc(color)}"><i></i>${esc(name)}</li>`).join(''),
+    legend: [...legend].map(([name, color]) => `<li style="--zone:${esc(color)}"><i></i>${esc(name)}</li>`).join('') + tieNote(ties),
   };
 }
 
@@ -830,19 +867,30 @@ function simCard(ev, sim, mp, note = '') {
 }
 
 export function miniTable(sim, real, zones, favorite) {
+  const ties = tieBreaks(sim.rows);
+  const TIE_COL = { w: 'w', gd: 'gd', gf: 'gf', order: 'pts' };
+  const cols = [['pts', 'P', 'Pontos'], ['gp', 'J', 'Jogos'], ['w', 'V', 'Vitórias'], ['d', 'E', 'Empates'], ['l', 'D', 'Derrotas'],
+    ['gf', 'GP', 'Gols pró'], ['ga', 'GC', 'Gols contra'], ['gd', 'SG', 'Saldo de gols']];
   return `<table class="mini-table">
-    <thead><tr><th>#</th><th></th><th class="club">Clube</th><th>P</th><th>J</th><th>SG</th></tr></thead>
+    <thead><tr><th>#</th><th class="club">Clube</th>${cols.map(([, l, title]) => `<th title="${esc(title)}">${l}</th>`).join('')}</tr></thead>
     <tbody>${sim.rows.map((t) => {
       const before = real.byId.get(t.id);
       const delta = before ? before.pos - t.pos : 0;
       const dp = before ? t.pts - before.pts : 0;
       const zone = zones.byPos[t.pos];
       const cls = [delta || dp ? 'changed' : '', t.id === favorite ? 'is-fav' : ''].filter(Boolean).join(' ');
+      const mine = ties.get(t.id) || [];
+      const cell = ([key]) => {
+        const tb = mine.filter((x) => TIE_COL[x.key] === key);
+        const value = key === 'pts' ? `${t.pts}${dp ? `<small class="${dp > 0 ? 'up-text' : 'down-text'}">${dp > 0 ? '+' : '−'}${Math.abs(dp)}</small>` : ''}`
+          : key === 'gd' ? (t.gd > 0 ? `+${t.gd}` : t.gd) : t[key];
+        const c = [key === 'pts' ? 'pts' : '', tb.length ? 'tb' : ''].filter(Boolean).join(' ');
+        return `<td${c ? ` class="${c}"` : ''}${tb.length ? ` title="${esc(tb.map((x) => tieTitle(t, x)).join(' '))}"` : ''}>${key === 'pts' && tb.length ? `<span>${t.pts}</span>${value.slice(String(t.pts).length)}` : value}</td>`;
+      };
       return `<tr data-team="${esc(t.id)}"${cls ? ` class="${cls}"` : ''}>
-        <td class="pos"${zone ? ` style="--zone:${esc(zone.color)}"` : ''}>${t.pos}</td>
-        <td class="mv">${moveChip(delta)}</td>
-        <td class="club"><span class="club-cell">${crest(t.logo, t.name, 18, 'mini')}<span class="club-name">${esc(t.name)}</span></span></td>
-        <td class="pts">${t.pts}${dp ? `<small class="${dp > 0 ? 'up-text' : 'down-text'}">${dp > 0 ? '+' : '−'}${Math.abs(dp)}</small>` : ''}</td><td>${t.gp}</td><td>${t.gd > 0 ? `+${t.gd}` : t.gd}</td>
+        <td class="pos"${zone ? ` style="--zone:${esc(zone.color)}"` : ''}>${t.pos}${moveChip(delta)}</td>
+        <td class="club"><span class="club-cell">${crest(t.logo, t.name, 18, 'mini')}<span class="club-name" title="${esc(t.name)}">${esc(t.name)}</span></span></td>
+        ${cols.map(cell).join('')}
       </tr>`;
     }).join('')}</tbody></table>`;
 }
@@ -948,6 +996,7 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
       <h2 class="section-title">${total ? 'Com esses placares' : 'Tabela agora'}</h2>
       ${impact.length ? `<ul class="impact">${impact.map((n) => `<li><b class="tag tone-${n.tone}">${esc(n.tag)}</b><span>${esc(n.text)}</span></li>`).join('')}</ul>` : ''}
       <div class="table-wrap">${miniTable(sim, real, zones, favorite)}</div>
+      ${tieLine(sim.rows)}
     </section>` : '';
   const how = HOW.replace('%OPEN%', open['how-odds'] ? ' open' : '').replace('%G%', esc(zones.gLabel || 'G6')).replace('%Z%', esc(zones.zLabel || 'Z4'));
   const oddsHtml = `

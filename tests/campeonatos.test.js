@@ -138,3 +138,11 @@ test('registro antigo de jogo remarcado sai da lista', () => {
   // Jogo a jogar sem outro registro jogado continua.
   assert.equal(dropStale([stale], now).length, 1);
 });
+
+test('as telas do app novo carregam (ui.js), com as mesmas tabelas do app do Brasileirão', async () => {
+  const ui = await import('../campeonatos/js/ui.js');
+  const root = await import('../js/ui.js');
+  for (const name of ['standingsTable', 'miniTable', 'tieLine', 'tieText', 'matchSheet', 'simView']) assert.equal(typeof ui[name], 'function', name);
+  assert.equal(ui.standingsTable.toString(), root.standingsTable.toString());
+  assert.equal(ui.miniTable.toString(), root.miniTable.toString());
+});

@@ -22,6 +22,30 @@ export function sortRows(rows) {
   return rows.sort((a, b) => b.pts - a.pts || b.w - a.w || b.gd - a.gd || b.gf - a.gf || a.order - b.order);
 }
 
+// Critérios de desempate do Brasileirão, na ordem; depois dos três primeiros, vale a ordem oficial da ESPN
+// (confronto direto, cartões vermelhos e amarelos, sorteio).
+export const TIE_RULES = ['vitórias', 'saldo de gols', 'gols pró', 'confronto direto', 'cartões vermelhos', 'cartões amarelos'];
+const TIE_KEYS = [['w', 'vitórias'], ['gd', 'saldo de gols'], ['gf', 'gols pró']];
+
+/**
+ * O que separa cada time dos vizinhos com os mesmos pontos, numa tabela já ordenada:
+ * Map id -> [{other, key, label, ahead}], key = 'w', 'gd', 'gf' ou 'order' (confronto direto ou cartões, pela
+ * ordem oficial), ahead = o time fica à frente do outro.
+ */
+export function tieBreaks(rows) {
+  const out = new Map();
+  const add = (row, item) => { if (!out.has(row.id)) out.set(row.id, []); out.get(row.id).push(item); };
+  for (let i = 0; i + 1 < rows.length; i++) {
+    const a = rows[i];
+    const b = rows[i + 1];
+    if (a.pts !== b.pts) continue;
+    const [key, label] = TIE_KEYS.find(([k]) => a[k] !== b[k]) || ['order', 'confronto direto ou cartões'];
+    add(a, { other: b, key, label, ahead: true });
+    add(b, { other: a, key, label, ahead: false });
+  }
+  return out;
+}
+
 /** Times do campeonato: da classificação da ESPN ou, sem ela, dos próprios jogos. */
 export function teamList(standings, events) {
   if (standings?.length) return standings.map((t, i) => ({ id: t.id, name: t.name, logo: t.logo, note: t.note, order: i }));

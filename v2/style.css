@@ -253,6 +253,10 @@ main { padding-top: 10px; }
 .v2-table td.pts { font: 900 17px/1 var(--display); font-stretch: 110%; }
 .v2-table td.num { font: 500 13px/1 var(--body); color: var(--muted); }
 .v2-table td.fm { padding-right: 10px; }
+/* Duas linhas por time: o nome e os números na primeira; vitórias, empates, derrotas e gols embaixo. */
+.v2-table tr.main td:not([rowspan]) { height: auto; padding-top: 10px; padding-bottom: 2px; }
+.v2-table tr.st td { height: auto; padding: 0 5px 9px; border-top: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 500 11.5px/1.2 var(--body); color: var(--muted); }
+.v2-table tr.st b { font-weight: 700; color: var(--ink); }
 .v2-pos { display: inline-grid; place-items: center; width: 24px; height: 22px; border-radius: 6px; font: 800 13px/1 var(--body); }
 .v2-pos.lib { background: var(--z-lib); color: var(--z-lib-ink); }
 .v2-pos.pre { background: var(--z-pre); color: var(--z-pre-ink); }

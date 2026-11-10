@@ -3,9 +3,10 @@
 // o número mostra e o que só se consulta de vez em quando fica recolhido. O que não muda (detalhe do
 // time, escolha do time, status dos dados, texto para compartilhar) vem direto de ui.js.
 export * from './ui.js';
-import { crest, flowChart, formDots, lineupsHtml, miniTable, pct, readingList, scorers, secadorLine, vagasNote, vagasRange, withSubs } from './ui.js';
+import { crest, flowChart, formDots, lineupsHtml, miniTable, pct, readingList, scorers, secadorLine, tieLine, tieNote, tieTitle, vagasNote, vagasRange, withSubs } from './ui.js';
 import { bucketLabels, goalTimeNote, h2hSummary, homeAwayNote, storyTags, tableLine } from './insights.js';
 import { decimal, dm, doo, esc, fmtTime, kickoff, o, plural, weekdayShort } from './util.js';
+import { tieBreaks } from './table.js';
 
 const ord = (n) => (n ? `${n}º` : '');
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -130,9 +131,13 @@ export function matchCard(ev, ctx) {
 
 const ZONE = (name) => (/Pré/.test(name) ? 'pre' : /Libertadores/.test(name) ? 'lib' : /Sul/.test(name) ? 'sul' : /Rebaix/.test(name) ? 'rel' : '');
 
-/** Classificação numa lista só: a zona aparece no quadradinho da posição. */
+/**
+ * Classificação numa lista só: a zona aparece no quadradinho da posição. Embaixo do nome, vitórias, empates,
+ * derrotas e gols; com os mesmos pontos, o número que desempata fica sublinhado.
+ */
 export function standingsTable({ table, zones, formById, favorite }) {
   const legend = new Map();
+  const ties = tieBreaks(table.rows);
   const body = table.rows.map((t) => {
     const zone = zones.byPos[t.pos];
     const z = zone ? ZONE(zone.name) : '';
@@ -140,17 +145,24 @@ export function standingsTable({ table, zones, formById, favorite }) {
     const r = t.result;
     const gd = t.gd > 0 ? `+${t.gd}` : t.gd;
     const live = r?.live ? `<span class="v2-live-dot" title="${esc(`${r.gf} x ${r.ga} contra ${r.opp.name}, em andamento`)}"></span>` : '';
-    return `<tr data-team="${esc(t.id)}"${t.id === favorite ? ' class="is-fav"' : ''}>
-      <td class="p"><span class="v2-pos ${z}"${zone ? ` title="${esc(zone.name)}"` : ''}>${t.pos}</span></td>
-      <td class="c">${crest(t.logo, t.name, 20, 'mini')}</td>
+    const mine = ties.get(t.id) || [];
+    const tb = (key, html) => {
+      const list = mine.filter((x) => x.key === key);
+      return list.length ? `<span class="tb" title="${esc(list.map((x) => tieTitle(t, x)).join(' '))}">${html}</span>` : html;
+    };
+    const fav = t.id === favorite ? ' is-fav' : '';
+    return `<tr data-team="${esc(t.id)}" class="main${fav}">
+      <td class="p" rowspan="2"><span class="v2-pos ${z}"${zone ? ` title="${esc(zone.name)}"` : ''}>${t.pos}</span></td>
+      <td class="c" rowspan="2">${crest(t.logo, t.name, 20, 'mini')}</td>
       <td class="n"><span class="nm">${esc(t.name)}</span>${t.id === favorite ? STAR : ''}${move(t.delta)}${live}</td>
-      <td class="pts">${t.pts}</td><td class="num">${t.gp}</td><td class="num">${gd}</td>
+      <td class="pts">${tb('order', t.pts)}</td><td class="num">${t.gp}</td><td class="num">${tb('gd', gd)}</td>
       <td class="fm">${dots(formById.get(t.id) || [])}</td>
-    </tr>`;
+    </tr>
+    <tr data-team="${esc(t.id)}" class="st${fav}"><td class="st" colspan="5"><b>${tb('w', t.w)}</b>V · <b>${t.d}</b>E · <b>${t.l}</b>D · <b>${tb('gf', t.gf)}</b> gols pró · <b>${t.ga}</b> contra</td></tr>`;
   }).join('');
   return {
     html: `<table class="v2-table"><thead><tr><th class="p">#</th><th class="c"></th><th class="n">Clube</th><th class="pts" title="Pontos">P</th><th class="j" title="Jogos">J</th><th class="sg" title="Saldo de gols">SG</th><th class="fm">Últ. 5</th></tr></thead><tbody>${body}</tbody></table>`,
-    legend: [...legend].map(([name, z]) => `<li><i class="v2-z ${z}"></i>${esc(name)}</li>`).join(''),
+    legend: [...legend].map(([name, z]) => `<li><i class="v2-z ${z}"></i>${esc(name)}</li>`).join('') + tieNote(ties),
   };
 }
 
@@ -266,7 +278,7 @@ function changes({ real, sim, impact, zones, favorite, total, open }) {
     }).join('') || '<p class="v2-cap muted">Ninguém muda de posição com esses placares.</p>'}
     ${moved.length > shown.length ? `<p class="v2-cap muted">E mais ${plural(moved.length - shown.length, 'time', 'times')}.</p>` : ''}
     <details class="v2-more" data-keep="sim-table"${open ? ' open' : ''}><summary><span>Ver a tabela completa com esses placares</span>${CHEVRON}</summary>
-      <div class="table-wrap">${miniTable(sim, real, zones, favorite)}</div></details>
+      <div class="table-wrap">${miniTable(sim, real, zones, favorite)}</div>${tieLine(sim.rows)}</details>
   </section>`;
 }
 

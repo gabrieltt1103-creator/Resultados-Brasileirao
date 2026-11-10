@@ -754,6 +754,24 @@ main {
 }
 .legend li { display: flex; align-items: center; gap: 6px; }
 .table-check { margin: 0 2px; font-size: 12.5px; color: var(--muted); }
+
+/* Desempate: o número que separa times com os mesmos pontos, sublinhado de leve. */
+.tb { text-decoration: underline dotted; text-decoration-thickness: 1.5px; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--ink) 50%, transparent); }
+.tb small { display: inline-block; }
+.legend .tb-note { flex-basis: 100%; display: block; line-height: 1.4; }
+.tb-line { margin: 8px 2px 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+/* Tabela com todos os números no celular: posição e seta empilhadas, colunas estreitas. */
+.standings th, .standings td { padding-inline: 3px; }
+.standings td { font-size: 13.5px; }
+.standings .pos { width: 34px; min-width: 34px; padding-left: 8px; }
+.standings .club { left: 34px; }
+.standings .pos .move { display: block; margin-top: 1px; font-size: 9.5px; line-height: 1; }
+.standings .club-name { max-width: 84px; }
+.standings .club-cell { gap: 5px; }
+.standings td.pts { font-size: 14.5px; }
+/* Resultado da rodada ou estrela do time do torcedor ao lado do nome: o nome encurta para a tabela seguir cabendo. */
+.standings .club-cell:has(.res) .club-name, .standings .club-cell:has(.star) .club-name { max-width: 66px; }
+.standings .club-cell:has(.res):has(.star) .club-name { max-width: 50px; }
 .table-check.ok b { color: var(--good); }
 .table-check.warn { color: var(--ink); padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border-left: 3px solid var(--gol); }
 .legend i, .zone-chip i { width: 10px; height: 10px; border-radius: 2px; background: var(--zone); }
@@ -1256,11 +1274,18 @@ details[open] > summary::before { transform: rotate(45deg); }
 .mini-table tbody tr, .odds-table tbody tr { cursor: pointer; }
 .mini-table tbody tr + tr td, .odds-table tbody tr + tr td { border-top: 1px solid var(--line); }
 .mini-table td.pos { width: 30px; font-family: var(--display); font-weight: 600; font-size: 15px; box-shadow: inset 3px 0 0 var(--zone, transparent); }
-.mini-table td.mv { width: 30px; padding-inline: 0; }
 .mini-table .club, .odds-table .club { text-align: left; }
 .mini-table .pts small { margin-left: 3px; font-size: 11px; font-weight: 600; }
 .mini-table tr.changed td { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
 .mini-table tr.is-fav td, .odds-table tr.is-fav td { background: color-mix(in srgb, var(--gol) 14%, var(--surface)); }
+/* Tabela do simulador com todos os números: colunas estreitas. */
+.mini-table th, .mini-table td { padding-inline: 2px; }
+.mini-table td { font-size: 13px; }
+.mini-table .club-name { max-width: 80px; }
+.mini-table .club-cell { gap: 5px; }
+.mini-table td.pos { width: 30px; text-align: left; padding-left: 7px; }
+.mini-table td.pos .move { display: block; margin-top: 1px; font-size: 9.5px; line-height: 1; }
+.mini-table .pts small { display: block; margin: 1px 0 0; font-size: 10px; line-height: 1; }
 .odds-table .pos-n { width: 20px; color: var(--muted); font-size: 14px; }
 .odds-table td.odd { position: relative; min-width: 46px; }
 .odds-table { font-size: 13.5px; }

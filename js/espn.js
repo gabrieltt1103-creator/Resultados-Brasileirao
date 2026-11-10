@@ -278,6 +278,8 @@ export function parseSummaryPlays(json) {
   const out = [];
   for (const x of json?.commentary || []) {
     const p = x.play;
+    // A disputa de pênaltis (período 5) vem à parte, em parseShootout: não é lance do jogo.
+    if (p?.period?.number >= 5) continue;
     let type = p?.type?.type;
     if (type === 'temp-attempt') type = TEMP_ATTEMPT.find(([re]) => re.test(x.text || p?.text || ''))?.[1] || type;
     const m = /(\d+)'(?:\+(\d+))?/.exec(x.time?.displayValue || p?.clock?.displayValue || '');
@@ -298,6 +300,43 @@ export function parseSummaryPlays(json) {
     });
   }
   return out;
+}
+
+/**
+ * Disputa de pênaltis, cobrança a cobrança e na ordem: [{side, team, who, scored, saved, keeper}], ou null
+ * sem disputa. Vem da lista da ESPN (batedor e se converteu, cada cobrança com o número do lance, que dá a
+ * ordem) e do lance a lance da disputa (período 5), que diz se a cobrança perdida foi defendida, e por quem.
+ */
+export function parseShootout(json) {
+  const comps = json?.header?.competitions?.[0]?.competitors || [];
+  const byId = new Map(comps.map((c) => [String(c.team?.id ?? c.id), c.homeAway]));
+  const byName = new Map(comps.map((c) => [c.team?.displayName, c.homeAway]));
+  const teamOf = new Map(comps.map((c) => [c.homeAway, String(c.team?.id ?? c.id)]));
+  const plays = (json?.commentary || []).filter((x) => x.play?.period?.number >= 5 && /^penalty---/.test(x.play?.type?.type || ''));
+  const textOf = (x) => x.text || x.play?.text || '';
+  const kicks = [];
+  for (const t of json?.shootout || []) {
+    const side = byId.get(String(t.id)) || byName.get(t.team);
+    if (!side) continue;
+    for (const s of t.shots || []) kicks.push({ order: Number(s.id) || s.shotNumber || 0, side, team: teamOf.get(side), who: s.player || '', scored: !!s.didScore });
+  }
+  // Sem a lista, pelo lance a lance da disputa.
+  if (!kicks.length) {
+    plays.forEach((x, i) => {
+      const side = byName.get(x.play.team?.displayName);
+      const type = x.play.type.type;
+      const who = (WHO_IN[type]?.exec(textOf(x)) || /^([^():!.]+?)\s*\(/.exec(textOf(x)))?.[1]?.trim() || '';
+      if (side) kicks.push({ order: i, side, team: teamOf.get(side), who, scored: type === 'penalty---scored' });
+    });
+  }
+  if (!kicks.length) return null;
+  kicks.sort((a, b) => a.order - b.order);
+  return kicks.map(({ order, ...k }) => {
+    if (k.scored) return k;
+    const p = plays.find((x) => x.play.type.type !== 'penalty---scored' && textOf(x).includes(k.who));
+    const saved = p?.play.type.type === 'penalty---saved';
+    return { ...k, saved, keeper: saved ? (KEEPER.exec(textOf(p))?.[1] || '').trim() : '' };
+  });
 }
 
 // "2025 Brasileiro Serie B" -> "Série B 2025"; "2025 CONMEBOL Libertadores" -> "Libertadores 2025".

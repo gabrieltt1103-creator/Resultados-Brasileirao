@@ -366,13 +366,21 @@ export function liveClock(ev) {
   return { period: base > 45 ? 2 : 1, base, extra: Number(m[2] || 0) };
 }
 
+// Lances que só o lance a lance completo tem. Em alguns jogos (fases iniciais da Copa do Brasil, por exemplo),
+// a ESPN publica só os principais (gols, cartões, trocas, pênaltis): sem eles, não há pressão para desenhar.
+const FLOW_DETAIL = /^(shot-|corner-|offside|foul)/;
+/** O lance a lance tem os lances de ataque (chutes, escanteios, faltas, impedimentos), e não só os principais? */
+export const fullPlays = (plays) => (plays || []).some((p) => FLOW_DETAIL.test(p.type));
+
 /**
- * Pressão de cada time minuto a minuto, pelo lance a lance (chutes, escanteios, faltas perto da área).
- * Cada minuto mostra a diferença entre os dois: positivo para o mandante, negativo para o visitante.
- * now: relógio do jogo ao vivo (liveClock). Devolve null quando há poucos lances.
+ * Pressão de cada time minuto a minuto, pelo lance a lance (chutes, escanteios, faltas perto da área), nos
+ * 90 minutos (a prorrogação fica de fora). Cada minuto mostra a diferença entre os dois: positivo para o
+ * mandante, negativo para o visitante. now: relógio do jogo ao vivo (liveClock). Devolve null quando há poucos
+ * lances ou quando o lance a lance só tem os principais.
  */
 export function matchFlow(plays, now = null) {
-  if (!plays?.length) return null;
+  plays = (plays || []).filter((p) => !(p.period > 2));
+  if (!plays.length || !fullPlays(plays)) return null;
   let stop1 = 0;
   let stop2 = 0;
   const used = [];
@@ -574,9 +582,10 @@ const ratioWords = (r) => (r >= 3 ? 'o triplo' : r >= 2 ? 'o dobro' : '');
  * Como está (ou como foi) o jogo, contado como para um amigo: um parágrafo por tempo, com quem foi
  * melhor e os lances na ordem (gols, gol anulado pelo VAR, pênalti perdido, expulsão, bola na trave),
  * e no fim como está agora (ao vivo) ou o veredito (encerrado). Números, só o minuto dos gols e lances.
- * plays: parseSummaryPlays; stats: {timeId: {...}}; flow: matchFlow. Devolve uma lista de parágrafos.
+ * plays: parseSummaryPlays; stats: {timeId: {...}}; flow: matchFlow; shootout: parseShootout (a disputa de
+ * pênaltis, contada no fim; prize: o que ela decidia, 'a vaga' ou 'o título'). Devolve uma lista de parágrafos.
  */
-export function matchReading(ev, { plays = null, stats = null, flow = null } = {}) {
+export function matchReading(ev, { plays = null, stats = null, flow = null, shootout = null, prize = 'a vaga' } = {}) {
   const live = ev.status.kind === 'live';
   if (!live && ev.status.kind !== 'post') return [];
   const T = (side) => (side === 'home' ? ev.home : ev.away);
@@ -856,7 +865,70 @@ export function matchReading(ev, { plays = null, stats = null, flow = null } = {
     } else if (idle.length === 2) close = close ? `${close} Ninguém finalizou até agora.` : 'Ninguém finalizou até agora.';
   }
   if (close) paragraphs.push(close);
+  if (shootout?.length) paragraphs.push(shootoutStory(ev, shootout, { prize }));
   return paragraphs;
+}
+
+// ---------- disputa de pênaltis ----------
+
+const ORDF = ['', 'primeira', 'segunda', 'terceira', 'quarta', 'quinta'];
+
+// A disputa já está decidida? Nas cinco primeiras de cada lado, quando um não alcança mais o outro; depois,
+// nas alternadas, quando os dois bateram o mesmo número de vezes e o placar é diferente.
+function shootoutOver(g, t) {
+  if (t.home < 5 || t.away < 5) return g.home > g.away + 5 - t.away || g.away > g.home + 5 - t.home;
+  return t.home === t.away && g.home !== g.away;
+}
+
+/**
+ * A disputa de pênaltis contada em poucas frases: quem venceu, quem perdeu cobrança e o que ela valia (a
+ * primeira do time, a que daria a vaga, a última), quem levou para as alternadas e como elas acabaram.
+ * kicks: parseShootout; prize: o que estava em jogo ('a vaga' ou 'o título').
+ */
+export function shootoutStory(ev, kicks, { prize = 'a vaga' } = {}) {
+  if (!kicks?.length) return '';
+  const T = (side) => (side === 'home' ? ev.home : ev.away);
+  const g = { home: 0, away: 0 };
+  const t = { home: 0, away: 0 };
+  const notes = [];
+  let alive = '';
+  const extra = [];
+  for (const k of kicks) {
+    const me = k.side;
+    const them = me === 'home' ? 'away' : 'home';
+    const round = t[me] + 1;
+    const after = (scored) => ({ g: { ...g, [me]: g[me] + (scored ? 1 : 0) }, t: { ...t, [me]: round } });
+    const win = after(true);
+    const lose = after(false);
+    const point = shootoutOver(win.g, win.t) && win.g[me] > win.g[them]; // marcando, decide
+    const must = shootoutOver(lose.g, lose.t) && lose.g[them] > lose.g[me]; // perdendo, cai
+    const team = T(me).name;
+    // "perdeu a primeira cobrança do Vasco", "parou em Weverton na última cobrança".
+    const miss = (obj) => (k.saved ? (k.keeper ? `${k.who} parou em ${k.keeper} n${obj}` : `${k.who} teve ${obj} defendida`) : `${k.who} ${point ? 'desperdiçou' : 'perdeu'} ${obj}`);
+    if (round > 5) extra.push({ k, point, must });
+    else if (!k.scored) notes.push(miss(must ? 'a última cobrança' : point ? `a cobrança que daria ${prize} ${ao(team)}` : `a ${ORDF[round]} cobrança ${doo(team)}`));
+    else if (point) notes.push(`${k.who} converteu a última`);
+    else if (must && round === 5 && them === kicks[0].side && kicks.length > 10) alive = `${k.who} marcou e levou a disputa para as alternadas`;
+    g[me] += k.scored ? 1 : 0;
+    t[me] = round;
+  }
+  // Disputa ainda em andamento (ao vivo): só o placar até aqui.
+  if (!shootoutOver(g, t)) return `Disputa de pênaltis em andamento: ${ev.home.name} ${g.home}, ${ev.away.name} ${g.away}.`;
+  const winner = g.home > g.away ? 'home' : 'away';
+  const out = [`Nos pênaltis, ${o(T(winner).name)} venceu por ${g[winner]} a ${g[winner === 'home' ? 'away' : 'home']}.`];
+  const list = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} e ${xs.at(-1)}` : xs[0] || '');
+  // Sem ninguém errar nas cinco primeiras, isso já diz tudo; senão, os erros e quem levou para as alternadas.
+  if (!notes.length) alive = '';
+  if (notes.length) out.push(`${list(notes)}${alive ? `, mas ${alive}` : ''}.`);
+  else if (extra.length) out.push('As dez primeiras cobranças entraram.');
+  if (extra.length) {
+    // Nas alternadas, só a última rodada (as de antes, todas iguais).
+    const rounds = Math.ceil(extra.length / 2);
+    const last = extra.slice(-2).map(({ k }) => (k.scored ? `${k.who} converteu` : k.saved && k.keeper ? `${k.who} parou em ${k.keeper}` : `${k.who} perdeu`));
+    const lead = alive ? 'Nelas' : 'Nas alternadas';
+    out.push(`${lead}${rounds > 1 ? `, que foram até a ${rounds}ª rodada` : ''}, ${list(last)}.`);
+  }
+  return out.map((s) => s[0].toUpperCase() + s.slice(1)).join(' ');
 }
 
 // Ao vivo: os últimos minutos, como impressão (quem está em cima e atrás do quê).

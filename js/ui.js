@@ -445,6 +445,33 @@ export function withSubs(ev, lineups) {
 }
 
 // Lance a lance: o mais recente em cima, com o intervalo entre os dois tempos.
+// Disputa de pênaltis: uma linha por rodada, com o mandante à esquerda e, no meio, o placar depois dela.
+function shootoutBlock(ev, kicks) {
+  if (!kicks?.length) return '';
+  const by = { home: kicks.filter((k) => k.side === 'home'), away: kicks.filter((k) => k.side === 'away') };
+  const rounds = Math.max(by.home.length, by.away.length);
+  const g = { home: 0, away: 0 };
+  const mark = (k) => (k.scored ? '<i class="pk-ico ok" aria-label="converteu">✓</i>' : `<i class="pk-ico miss" aria-label="${k.saved ? 'defendida' : 'perdeu'}">✕</i>`);
+  const cell = (k, side) => {
+    if (!k) return `<span class="pk pk-${side}"></span>`;
+    const note = !k.scored ? `<small>${k.saved ? (k.keeper ? `defendida por ${esc(k.keeper)}` : 'defendida') : 'perdeu'}</small>` : '';
+    return `<span class="pk pk-${side}${k.scored ? '' : ' is-miss'}"><span class="pk-who">${esc(k.who)}${note}</span>${mark(k)}</span>`;
+  };
+  const rows = [];
+  for (let r = 0; r < rounds; r++) {
+    if (r === 5) rows.push('<li class="pk-break">Alternadas</li>');
+    const h = by.home[r];
+    const a = by.away[r];
+    if (h?.scored) g.home++;
+    if (a?.scored) g.away++;
+    rows.push(`<li class="pk-row">${cell(h, 'home')}<b class="pk-score">${g.home} – ${g.away}</b>${cell(a, 'away')}</li>`);
+  }
+  const first = kicks[0].side === 'home' ? ev.home : ev.away;
+  return `<section class="sheet-block"><h3 class="sub-title">Disputa de pênaltis <small>${esc(ev.home.name)} ${g.home} x ${g.away} ${esc(ev.away.name)}</small></h3>
+    <ol class="pens">${rows.join('')}</ol>
+    <p class="chart-note">${esc(o(first.name).replace(/^./, (c) => c.toUpperCase()))} bateu primeiro.</p></section>`;
+}
+
 function timeline(ev, lineups) {
   const list = withSubs(ev, lineups);
   if (!list.length) return '';
@@ -582,13 +609,15 @@ export function readingList(paragraphs) {
 }
 
 // Como está (ou como foi) o jogo: o fluxo da partida e a leitura logo abaixo.
-function readingBlock(ev, flow, lines) {
+// note: por que não há gráfico de pressão (lance a lance só com os principais), quando é o caso.
+function readingBlock(ev, flow, lines, note = '') {
   if (!flow && !lines?.length) return '';
   const live = ev.status.kind === 'live';
   return `<section class="sheet-block">
     <h3 class="sub-title">${live ? 'Como está o jogo' : 'Como foi o jogo'}${flow ? ' <small>pressão de cada time, minuto a minuto</small>' : ''}</h3>
     ${flow ? flowChart(flow, ev, (lines || []).join(' ')) : ''}
     ${readingList(lines)}
+    ${!flow && note ? `<p class="chart-note">${esc(note)}</p>` : ''}
   </section>`;
 }
 
@@ -619,7 +648,8 @@ export function matchSheet(ev, ctx) {
     </div>
     <p class="sh-meta">${esc([ctx.roundLabel, `${weekdayShort(ev.date)} ${dm(ev.date)} · ${fmtTime.format(ev.date)}`, ev.venue].filter(Boolean).join(' · '))}${ev.moved ? ' · <b>jogo remarcado</b>' : ''}</p>
     ${tags.length ? `<p class="tags center">${tags.map((t) => `<b class="tag tone-gol">${esc(t)}</b>`).join('')}</p>` : ''}
-    ${readingBlock(ev, ctx.flow, ctx.reading)}
+    ${readingBlock(ev, ctx.flow, ctx.reading, ctx.flowNote)}
+    ${shootoutBlock(ev, ctx.shootout)}
     ${ev.incidents.length || ctx.lineups?.subs?.length ? `<section class="sheet-block"><h3 class="sub-title">Lance a lance</h3>${timeline(ev, ctx.lineups)}</section>` : ''}
     ${lineupsBlock(ev, ctx.lineups, ctx.coaches)}
     ${stats ? `<section class="sheet-block"><h3 class="sub-title">Estatísticas</h3>${stats}</section>` : (!pre && ctx.statsLoading ? '<p class="chart-note center">Carregando estatísticas…</p>' : '')}

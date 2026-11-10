@@ -1,7 +1,7 @@
 import * as espn from './espn.js';
 import { buildRounds, dropReplaced, isFinished, pickDefault, playsIn, roundName, sortEvents } from './rounds.js';
 import { computeTable, finishedTable, formOf, reconcile, scenarios, zonesFor } from './table.js';
-import { headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
+import { fullPlays, headlines, impactLines, lastGoal, liveClock, matchFlow, matchReading, matchStory, roundStats, scoreChange, trends } from './insights.js';
 import { PROMOTED, chances, matchPicks, model, priorFrom, secador, suggestScore } from './sim.js';
 import { COMPS, CUPS, SMALL, compByKey, compOf, dropStale, formatsFor, involves, phaseLabel, phasesOf, pickPhase, tiesOf } from './comps.js';
 import { knockoutOdds, openPhase } from './knockout.js';
@@ -351,7 +351,9 @@ async function loadSummary(id, force = false) {
     const h2h = espn.parseHeadToHead(json, id);
     // Escalações (e substituições), publicadas pela ESPN cerca de uma hora antes do jogo.
     const lineups = espn.parseSummaryLineups(json);
-    state.summaries.set(id, { stats, plays, h2h, lineups, t: Date.now() });
+    // Disputa de pênaltis, cobrança a cobrança (mata-mata).
+    const shootout = espn.parseShootout(json);
+    state.summaries.set(id, { stats, plays, h2h, lineups, shootout, t: Date.now() });
     const played = ev.status.kind === 'live' || ev.status.kind === 'post';
     const ok = !played || Object.keys(stats).length > 0;
     state.diag.summary = { t: Date.now(), ok, error: ok ? null : 'sem estatísticas' };
@@ -1516,6 +1518,11 @@ function cupMatchSheet(ev, now) {
   const all = allEvents();
   const phase = state.cups[ev.comp]?.phases.find((p) => p.slug === ev.phase);
   const tie = phase?.knockout ? tiesOf(phase.events).find((t) => t.legs.includes(ev)) : null;
+  const final = !!tie && phase === state.cups[ev.comp]?.phases.at(-1) && /final/.test(phase.slug) && tiesOf(phase.events).length === 1;
+  // Lance a lance só com os principais (sem chutes nem escanteios), já com o jogo andando: o porquê de não ter gráfico.
+  const clock = liveClock(ev);
+  const along = ev.status.kind === 'post' || (clock && (clock.period === 2 || clock.base >= 20));
+  const flowNote = along && sum?.plays?.length && !fullPlays(sum.plays) ? 'Sem o gráfico de pressão: neste jogo, a ESPN publicou só os lances principais (gols, cartões e trocas).' : '';
   return ui.matchSheet(ev, {
     table: null, scen: null, stats,
     statsLoading: !!sum?.loading || (!sum && (ev.status.kind === 'live' || ev.status.kind === 'post')),
@@ -1523,12 +1530,14 @@ function cupMatchSheet(ev, now) {
     favorite: state.favorite, story: null, roundLabel: cupLabel(ev), now, zones: state.zones, inFocus: false,
     h2h: sum?.h2h || null,
     flow,
-    reading: matchReading(ev, { plays: sum?.plays || null, stats, flow }),
+    flowNote,
+    reading: matchReading(ev, { plays: sum?.plays || null, stats, flow, shootout: sum?.shootout || null, prize: final || compOf(ev.comp)?.kind === 'unico' ? 'o título' : 'a vaga' }),
+    shootout: sum?.shootout || null,
     lineups: sum?.lineups || null,
     coaches: { home: coachOf(ev, ev.home), away: coachOf(ev, ev.away) },
     picks: cupPicks(ev),
     canSim: false,
-    tieNote: tie ? ui.tieText(tie, { final: phase === state.cups[ev.comp]?.phases.at(-1) && /final/.test(phase.slug) && tiesOf(phase.events).length === 1 }) : '',
+    tieNote: tie ? ui.tieText(tie, { final }) : '',
   });
 }
 

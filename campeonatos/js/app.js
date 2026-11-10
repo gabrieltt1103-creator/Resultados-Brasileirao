@@ -1288,10 +1288,13 @@ function renderSim() {
   });
 }
 
-// Jogos adiados ainda sem data que são de outras rodadas: aparecem no simulador de qualquer rodada,
-// para quem quer simular o campeonato até o fim não ficar com um jogo faltando.
+// Jogos de outras rodadas que ainda faltam: os adiados ainda sem data e os remarcados de rodadas que já
+// passaram (um jogo da rodada 21 jogado em novembro). Aparecem no simulador de qualquer rodada, para quem
+// quer simular o campeonato até o fim não ficar com um jogo faltando.
 function postponedElsewhere(r) {
-  return sortEvents(eventList()).filter((e) => e.status.kind === 'off' && !r.events.includes(e) && state.roundOf.has(e.id));
+  const past = new Set(state.rounds.slice(0, state.focusIdx));
+  const late = (e) => (e.status.kind === 'pre' || e.status.kind === 'live') && past.has(state.roundOf.get(e.id));
+  return sortEvents(eventList()).filter((e) => !r.events.includes(e) && state.roundOf.has(e.id) && (e.status.kind === 'off' || late(e)));
 }
 
 // Gols por jogo no campeonato, com os jogos encerrados (só com a temporada completa).

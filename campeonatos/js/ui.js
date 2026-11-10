@@ -801,7 +801,7 @@ function simCard(ev, sim, mp, note = '') {
   if (final) status = 'FIM';
   else if (s.kind === 'live') status = `${esc(s.label)}<span class="pulse" aria-hidden="true"></span>`;
   else if (s.kind === 'off') status = `<small>${esc(s.label)}</small>${note ? `<small>${esc(note)}</small>` : ''}`;
-  else status = `${esc(weekdayShort(ev.date))}<small>${esc(fmtTime.format(ev.date))}</small>`;
+  else status = `${esc(weekdayShort(ev.date))}<small>${esc(fmtTime.format(ev.date))}</small>${note ? `<small>${esc(note)}</small>` : ''}`;
   const value = (side) => (sim ? sim[side] : s.kind === 'live' ? (side === 'h' ? ev.home.score : ev.away.score) : null);
   const row = (t, side) => `
     <div class="sim-row">
@@ -941,7 +941,7 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
       ${doneList(round.events.filter((e) => e.status.kind === 'post'), open['sim-done'])}`;
   const later = postponed.length ? `
     <section class="block">
-      <h2 class="section-title">${postponed.length === 1 ? 'Jogo adiado' : 'Jogos adiados'} <small>ainda sem data, de outras rodadas</small></h2>
+      <h2 class="section-title">${postponed.length === 1 ? 'Jogo atrasado' : 'Jogos atrasados'} <small>${postponed.every(({ ev }) => ev.status.kind === 'off') ? 'ainda sem data, ' : ''}${postponed.length === 1 ? 'de outra rodada' : 'de outras rodadas'}</small></h2>
       <div class="sim-list">${postponed.map(({ ev, label }) => simCard(ev, sims[ev.id], picksOf(ev), label)).join('')}</div>
     </section>` : '';
   const impactHtml = sim && real ? `

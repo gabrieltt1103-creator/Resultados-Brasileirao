@@ -56,13 +56,17 @@ export function buildRounds(events, { standings = [], fullSeason = false } = {})
   return rounds;
 }
 
-// Janelas de datas: um intervalo de mais de 36 h começa outra janela.
+// Janelas de datas: um intervalo de mais de 36 h começa outra janela, e também um time que volta a jogar
+// (numa rodada, cada time joga uma vez). No fim do campeonato, com rodada no meio da semana e jogos
+// remarcados, há jogo quase todo dia e as rodadas se encostam sem intervalo nenhum.
 function windowsOf(games) {
   const index = new Map();
   let w = -1;
   let last = null;
+  let seen = new Set();
   for (const ev of games) {
-    if (last === null || ev.date - last > WINDOW_GAP_MS) w++;
+    if (last === null || ev.date - last > WINDOW_GAP_MS || seen.has(ev.home.id) || seen.has(ev.away.id)) { w++; seen = new Set(); }
+    seen.add(ev.home.id).add(ev.away.id);
     index.set(ev, w);
     last = ev.date;
   }
@@ -140,18 +144,49 @@ export function byMirror(list) {
     if (ws.every((w) => sideOf.get(w) === 0)) return 'par de rodadas sem jogos de volta';
   }
 
-  // Jogos adiados: vão para o grupo em que os dois times ainda não jogaram (o mais próximo nas datas).
+  // Jogos adiados: vão para um grupo em que os dois times ainda não jogaram, de preferência o de uma das
+  // janelas dos dois jogos e, entre os outros, o mais próximo nas datas. Com muitos adiados (2020, 2021,
+  // 2024), a escolha de um pode tirar a vaga de outro: vão primeiro os que têm menos opções, voltando atrás
+  // quando não fecha.
   const established = [...slots.keys()];
-  for (const g of doubt) {
+  const options = (g) => {
     const free = established.filter((r) => {
       const s = slots.get(r);
       return s.pairs.length < n / 2 && !s.teams.has(g[0].home.id) && !s.teams.has(g[0].away.id);
     });
-    if (!free.length) return `sem rodada para ${g[0].home.name} x ${g[0].away.name}`;
-    const own = free.filter((r) => r === find(win.get(g[0])) || r === find(win.get(g[1])));
+    const own = (r) => (r === find(win.get(g[0])) || r === find(win.get(g[1])) ? 0 : 1);
     const dist = (r) => Math.min(...windowsBySlot.get(r).flatMap((w) => g.map((e) => Math.abs(e.date.getTime() - start.get(w)))));
-    const root = (own.length ? own : free).sort((x, y) => dist(x) - dist(y))[0];
-    put(root, g);
+    return free.sort((x, y) => own(x) - own(y) || dist(x) - dist(y));
+  };
+  const take = (r, g) => {
+    const s = slots.get(r);
+    s.pairs.splice(s.pairs.indexOf(g), 1);
+    s.teams.delete(g[0].home.id);
+    s.teams.delete(g[0].away.id);
+  };
+  let budget = 50000;
+  let stuck = null;
+  const solve = (left) => {
+    if (!left.length) return true;
+    if (--budget < 0) return false;
+    let best = null;
+    let opts = null;
+    for (const g of left) {
+      const o = options(g);
+      if (!o.length) { stuck ||= g; return false; }
+      if (!opts || o.length < opts.length) { best = g; opts = o; }
+    }
+    const rest = left.filter((g) => g !== best);
+    for (const r of opts) {
+      put(r, best);
+      if (solve(rest)) return true;
+      take(r, best);
+    }
+    return false;
+  };
+  if (!solve(doubt)) {
+    const g = stuck || doubt[0];
+    return budget < 0 ? 'jogos adiados demais para encaixar' : `sem rodada para ${g[0].home.name} x ${g[0].away.name}`;
   }
   const all = [...slots.entries()];
   if (all.length !== n - 1) return `${all.length} pares de rodadas em vez de ${n - 1}`;

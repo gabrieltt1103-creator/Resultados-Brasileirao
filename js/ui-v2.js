@@ -224,7 +224,7 @@ function simCard(ev, sim, mp, note = '') {
   const s = ev.status;
   const live = s.kind === 'live';
   const when = live ? `● Ao vivo · ${s.half ? 'intervalo' : s.label} · ${ev.home.score}–${ev.away.score} agora`
-    : s.kind === 'off' ? `${s.label}${note ? ` · ${note}` : ''} · ainda sem data` : cap(kickoff(ev.date));
+    : s.kind === 'off' ? `${s.label}${note ? ` · ${note}` : ''} · ainda sem data` : `${cap(kickoff(ev.date))}${note ? ` · ${note}` : ''}`;
   const value = (k) => (sim ? sim[k] : live ? (k === 'h' ? ev.home.score : ev.away.score) : null);
   const outcome = sim ? Math.sign(sim.h - sim.a) : null;
   const pick = (k, name, fallback) => {
@@ -352,7 +352,7 @@ export function simView({ round, roundLabel, sims, real, sim, zones, impact, odd
     : `<div class="v2-list">${pending.map((e) => simCard(e, sims[e.id], picksOf(e))).join('')}</div>${doneList(round.events.filter((e) => e.status.kind === 'post'), open['sim-done'])}`;
   // Adiado de outra rodada, ainda sem data: entra aqui para a simulação do campeonato ficar completa.
   const later = postponed.length
-    ? `<section class="v2-sec">${label(postponed.length === 1 ? 'Jogo adiado, de outra rodada' : 'Jogos adiados, de outras rodadas')}<div class="v2-list">${postponed.map(({ ev, label: from }) => simCard(ev, sims[ev.id], picksOf(ev), from)).join('')}</div></section>`
+    ? `<section class="v2-sec">${label(postponed.length === 1 ? 'Jogo atrasado, de outra rodada' : 'Jogos atrasados, de outras rodadas')}<div class="v2-list">${postponed.map(({ ev, label: from }) => simCard(ev, sims[ev.id], picksOf(ev), from)).join('')}</div></section>`
     : '';
   return head + games + later
     + changes({ real, sim, impact, zones, favorite, total, open: open['sim-table'] })

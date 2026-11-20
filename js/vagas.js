@@ -14,9 +14,10 @@ export const FOREIGN = { att: 0.85, def: 1.15 };
 
 /**
  * Regras do ano: vagas da tabela (base) e quem leva a vaga da Copa do Brasil (finalists: os dois finalistas,
- * desde 2026; antes, só o campeão, e a tabela tinha o G6).
+ * desde 2026; antes, só o campeão, e a tabela tinha o G6); sul: vagas da Sul-Americana pela tabela, logo
+ * depois das da Libertadores.
  */
-export const rulesFor = (year) => (year >= 2026 ? { base: 5, finalists: true } : { base: 6, finalists: false });
+export const rulesFor = (year) => (year >= 2026 ? { base: 5, finalists: true, sul: 6 } : { base: 6, finalists: false, sul: 6 });
 
 // Gols esperados de um jogo pelo modelo (em campo neutro: a média de jogar em casa e fora). Null sem força.
 export const lambdaOf = (m) => (h, a, neutral) => {
@@ -75,7 +76,7 @@ export function cupSlots({ slug, phases, odds, ours, finalists }) {
 }
 
 /**
- * Entrada das vagas para as chances do Brasileirão: {base, finalists, cups: [[{ids, p}], ...]}, ou null se
+ * Entrada das vagas para as chances do Brasileirão: {base, finalists, sul, cups: [[{ids, p}], ...], slugs}, ou null se
  * alguma das três copas ainda não dá para saber. cups: {slug: {phases, odds}}; ours: ids da Série A.
  */
 export function vagasInput({ year, cups, ours }) {
@@ -88,5 +89,5 @@ export function vagasInput({ year, cups, ours }) {
     if (!s) return null;
     list.push(s);
   }
-  return { ...rules, cups: list };
+  return { ...rules, cups: list, slugs: VAGAS_CUPS };
 }

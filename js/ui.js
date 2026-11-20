@@ -200,9 +200,10 @@ export function secadorLine(s) {
 
 /**
  * Cartão do secador no topo dos jogos.
- * on: ligado; team: time do torcedor; summary: {head, sub, text}; rivals: nomes; past: rodada que já passou.
+ * on: ligado; team: time do torcedor; summary: {head, sub, text}; rivals: nomes; past: rodada que já passou;
+ * cups: finais de copa que mexem com a vaga do time (cupAdvice, em secador.js).
  */
-export function secadorCard({ on, team, summary, rivals = [], past = false }) {
+export function secadorCard({ on, team, summary, rivals = [], past = false, cups = [] }) {
   const toggle = `<button type="button" class="sec-toggle" role="switch" aria-checked="${on}" data-action="secador" aria-label="${on ? 'Desligar o secador' : 'Ligar o secador'}"><i></i></button>`;
   const top = (sub) => `<div class="sec-top"><span class="sec-title"><i class="sec-ico">${DRYER}</i><span>Secador${sub ? `<small>${esc(sub)}</small>` : ''}</span></span>${toggle}</div>`;
   // Desligado, ou numa rodada que já passou: só uma linha, para não pesar no topo dos jogos.
@@ -212,6 +213,7 @@ export function secadorCard({ on, team, summary, rivals = [], past = false }) {
   return `<section class="secador on">${top('')}
     <div class="sec-who">${crest(team.logo, team.name, 24)}<span>${esc(summary.head)}${summary.sub ? `<small>${esc(summary.sub)}</small>` : ''}</span></div>
     ${summary.text ? `<p class="sec-text">${esc(summary.text)}</p>` : ''}
+    ${cups.length ? `<div class="sec-cups"><p class="sec-cups-h">Fora da rodada</p>${cups.map(secadorLine).join('')}</div>` : ''}
     <button type="button" class="sec-rivals" data-team="${esc(team.id)}"><span>${rivals.length > 1 ? 'Rivais' : 'Rival'}: <b>${esc(names)}</b></span><u>${rivals.length ? 'editar' : 'escolher'}</u></button>
   </section>`;
 }
@@ -819,7 +821,9 @@ export function pct(p) {
 
 function oddsTiles(o, zones) {
   const tiles = [['Título', o.title]];
-  if (zones.g) tiles.push([zones.gLabel, o.g]);
+  // Com as vagas das copas: a chance de Libertadores de verdade (a zona pode ir até o G9) e a de Sul-Americana.
+  if (o.lib != null) tiles.push(['Libertadores', o.lib], ['Sul-Americana', o.sul]);
+  else if (zones.g) tiles.push([zones.gLabel, o.g]);
   if (zones.zStart) tiles.push([`Cair (${zones.zLabel})`, o.z]);
   tiles.push(['Pontos no fim', null, Math.round(o.pts)]);
   return tiles.map(([l, p, v]) => `<div><span>${esc(l)}</span><b>${v ?? pct(p)}</b></div>`).join('');

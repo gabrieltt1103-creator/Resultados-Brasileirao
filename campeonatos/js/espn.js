@@ -101,7 +101,7 @@ export function parseEvent(e) {
   const comps = c.competitors || [];
   const side = (x) => ({
     id: String(x?.team?.id ?? x?.id ?? ''),
-    name: x?.team?.shortDisplayName || x?.team?.displayName || x?.team?.name || '?',
+    name: (x?.team?.shortDisplayName || x?.team?.displayName || x?.team?.name || '?').trim(),
     abbr: x?.team?.abbreviation || '',
     logo: logoOf(x?.team),
     color: hexColor(x?.team?.color),
@@ -198,7 +198,7 @@ export function parseStandings(json) {
     const ga = stat('pointsAgainst') ?? 0;
     return {
       id: String(en.team?.id ?? ''),
-      name: en.team?.shortDisplayName || en.team?.displayName || '?',
+      name: (en.team?.shortDisplayName || en.team?.displayName || '?').trim(),
       logo: logoOf(en.team),
       rank: stat('rank'),
       pts: stat('points') ?? 0,

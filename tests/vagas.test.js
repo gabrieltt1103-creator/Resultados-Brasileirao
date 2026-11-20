@@ -18,7 +18,7 @@ const cut = (rules, ...cups) => libertadoresCut(table.map((_, i) => i), table.ma
 
 test('até onde vai a vaga pela tabela, com as regras de 2026', () => {
   const r = rulesFor(2026);
-  assert.deepEqual(r, { base: 5, finalists: true });
+  assert.deepEqual(r, { base: 5, finalists: true, sul: 6 });
   // Finalistas da Copa do Brasil fora da zona, campeões continentais estrangeiros: só o G5.
   assert.equal(cut(r, ['t12', 't14'], [], []), 5);
   // Finalista que também está no G5 libera a vaga da tabela.
@@ -37,7 +37,7 @@ test('até onde vai a vaga pela tabela, com as regras de 2026', () => {
 
 test('regras de antes de 2026: G6 e o campeão da Copa do Brasil (como em 2019 e 2024)', () => {
   const r = rulesFor(2025);
-  assert.deepEqual(r, { base: 6, finalists: false });
+  assert.deepEqual(r, { base: 6, finalists: false, sul: 6 });
   // 2019: Flamengo campeão brasileiro e da Libertadores, Athletico (5º) campeão da Copa do Brasil: G8.
   assert.equal(cut(r, ['t5'], ['t1'], []), 8);
   // 2024: Botafogo campeão brasileiro e da Libertadores, Flamengo (3º) campeão da Copa do Brasil: G8.
@@ -117,4 +117,48 @@ test('na tela: das posições já garantidas até a última que ainda pode ter v
   const only = vagasRange({ base: 5, dist: { 5: 1 } });
   assert.deepEqual([only.from, only.to], [5, 5]);
   assert.equal(vagasRange(null), null);
+});
+
+test('Libertadores e Sul-Americana por time: as seis seguintes, e o secador com as finais das copas', async () => {
+  const { secador } = await import('../js/sim.js');
+  const { cupAdvice, objectiveFor } = await import('../js/secador.js');
+  const rounds = buildRounds(events, { standings, fullSeason: true });
+  const t = computeTable({ standings, events, round: rounds[pickDefault(rounds, Date.parse('2026-10-12T02:00:00Z'))], complete: true });
+  const zones = zonesFor(standings);
+  const [first, second] = standings;
+  const vagas = { ...rulesFor(2026), slugs: ['bra.copa_do_brazil', 'conmebol.libertadores', 'conmebol.sudamericana'],
+    cups: [[{ ids: [first.id, second.id], p: 1 }], [{ ids: [second.id], p: 0.7 }, { ids: [], p: 0.3 }], [{ ids: [], p: 1 }]] };
+  const c = chances({ finished: t.finished, events, zones, runs: 600, seed: 3, vagas });
+  const all = [...c.byId.values()];
+  // Seis vagas de Sul-Americana em todo campeonato sorteado; ninguém vai às duas.
+  assert.ok(Math.abs(all.reduce((s, o) => s + o.sul, 0) - 6) < 1e-9);
+  assert.ok(all.every((o) => o.lib + o.sul <= 1 + 1e-9));
+  assert.equal(c.byId.get(first.id).lib, 1);
+  // Secador: a final da Libertadores mexe com quem está perto da zona (a vaga do campeão desce para a tabela).
+  const r31 = rounds.find((r) => r.number === 31);
+  const mid = standings[7].id;
+  const res = secador({ finished: t.finished, events, targets: r31.events.map((e) => e.id), teamIds: [mid], zones, runs: 1500, prior: null, vagas });
+  const mine = res.teams[mid];
+  assert.ok(mine.base.lib > 0 && mine.base.lib < 1 && mine.games.every((g) => g.lib.length === 3 && g.sul.length === 3));
+  assert.equal(mine.cups.length, 1);
+  const [champ, foreign] = mine.cups[0].options;
+  assert.equal(mine.cups[0].slug, 'conmebol.libertadores');
+  assert.ok(champ.lib > foreign.lib);
+  // Objetivo com as vagas: Libertadores e Sul-Americana no lugar do G.
+  assert.equal(objectiveFor({ title: 0, g: 0.01, z: 0, lib: 0.3, sul: 0.7 }, zones), 'lib');
+  assert.equal(objectiveFor({ title: 0, g: 0, z: 0.02, lib: 0, sul: 0.6 }, zones), 'sul');
+  assert.equal(objectiveFor({ title: 0, g: 0.5, z: 0 }, zones), 'g');
+  // Conselho para a final: torça por quem libera a vaga; o rival só com ganho grande; a própria final.
+  const finals = { 'conmebol.libertadores': { name: 'Libertadores', when: 'sáb 28/11', teams: [{ id: second.id, name: second.name }, { id: 'x', name: 'Estudiantes' }] } };
+  const help = cupAdvice({ team: { id: mid }, objective: 'lib', res: mine, finals });
+  assert.equal(help[0].kind, 'help');
+  assert.match(help[0].text, new RegExp(`^Na final da Libertadores \\(sáb 28/11\\)\\. Chance de Libertadores: \\d+% com o título do ${second.name}, \\d+% com o do Estudiantes\\.$`));
+  const small = { cups: [{ slug: 'conmebol.libertadores', options: [{ ids: [second.id], lib: 0.05 }, { ids: [], lib: 0.01 }] }] };
+  assert.equal(cupAdvice({ team: { id: mid }, rivals: new Set([second.id]), objective: 'lib', res: small, finals })[0].kind, 'pride');
+  const big = { cups: [{ slug: 'conmebol.libertadores', options: [{ ids: [second.id], lib: 0.8 }, { ids: [], lib: 0.5 }] }] };
+  assert.equal(cupAdvice({ team: { id: mid }, rivals: new Set([second.id]), objective: 'lib', res: big, finals })[0].kind, 'nose');
+  const own = { cups: [{ slug: 'conmebol.libertadores', options: [{ ids: [second.id], lib: 1 }, { ids: [], lib: 0.7 }] }] };
+  assert.equal(cupAdvice({ team: { id: second.id }, objective: 'lib', res: own, finals })[0].text, 'Final da Libertadores (sáb 28/11). Chance de Libertadores: 100% com o título, 70% sem.');
+  // Sem as vagas (ou com outro objetivo), nada de final.
+  assert.deepEqual(cupAdvice({ team: { id: mid }, objective: 'z', res: mine, finals }), []);
 });

@@ -7,7 +7,7 @@ import { COMPS, CUPS, SMALL, compByKey, compOf, dropStale, formatsFor, involves,
 import { knockoutOdds, openPhase } from './knockout.js';
 import { formatFits, stateOdds } from './estadual.js';
 import { CONT, FOREIGN, VAGAS_CUPS, continentalModel, lambdaOf, vagasInput } from './vagas.js';
-import { objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
+import { cupAdvice, objectiveFor, pick, restate, rivalsOf, sameState, secadorSummary, stakeOf, verdict, verdictText } from './secador.js';
 import { deltaMonths, vanished } from './season.js';
 import { coachFits, fetchCoaches } from './coach.js';
 import * as fx from './fx.js';
@@ -981,14 +981,17 @@ function scheduleSecador() {
   const list = eventList();
   const live = list.filter((e) => e.status.kind === 'live').map((e) => `${e.id}:${e.home.score}-${e.away.score}@${e.status.label}`).join(',');
   const done = list.filter((e) => e.status.kind === 'post').length;
-  const sig = `${r.number}|${teamIds.join(',')}|${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}`;
+  // Vagas das copas: com elas, o secador também olha a Libertadores (até o G9) e a Sul-Americana.
+  const vagas = vagasNow();
+  const vagasSig = vagas ? vagas.cups.map((c) => c.map((x) => `${x.ids.join('+')}:${x.p.toFixed(3)}`).join(',')).join('/') : '';
+  const sig = `${r.number}|${teamIds.join(',')}|${done}|${live}|${state.zones.g}|${state.zones.zStart}|${state.prior ? 'p' : ''}|${vagasSig}`;
   if (sig === state.secadorSig) return;
   state.secadorSig = sig;
   const token = ++secadorToken;
   const round = r.number;
   const input = {
     kind: 'secador', finished: [...t.finished.values()], events: list.map(compactEvent), zones: { g: state.zones.g, zStart: state.zones.zStart },
-    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamIds, runs: SECADOR_RUNS, prior: priorList(),
+    targets: r.events.filter((e) => e.status.kind !== 'off').map((e) => e.id), teamIds, runs: SECADOR_RUNS, prior: priorList(), vagas,
   };
   const local = () => secador({ ...input, finished: t.finished, prior: state.prior });
   // Um worker antigo (do cache do navegador) responderia em outro formato: confere antes de usar.
@@ -1043,6 +1046,8 @@ function secadorView(r) {
   if (fixed) saveAdvice();
   const ready = state.table?.mode === 'jogos' && !got?.failed;
   const summary = secadorSummary({ team, objective, base: mine?.base || null, verdicts, zones: state.zones, ready, rivals: rivals.size });
+  // Finais de copa por jogar que mexem com a vaga do time (Libertadores, Sul-Americana): fora da rodada.
+  const cups = mine ? cupAdvice({ team, rivals, objective, res: mine, finals: finalsInfo() }) : [];
   // Jogo sem linha ganha só um aviso discreto, para ficar claro que o secador olhou o jogo
   // (a v2 ainda apaga um pouco os que não importam).
   const lines = new Map();
@@ -1052,7 +1057,18 @@ function secadorView(r) {
     else if (v.kind === 'mine') lines.set(ev.id, { kind: 'mine' });
     else lines.set(ev.id, { kind: 'none', quiet: v.kind === 'none' ? 'Tanto faz pra você' : 'Pesa pouco pra você' });
   }
-  return { on: true, team, rivals: rivalNames, summary, lines };
+  return { on: true, team, rivals: rivalNames, summary, lines, cups };
+}
+
+// Finais da Libertadores e da Sul-Americana ainda por jogar, com os dois times (para o secador).
+function finalsInfo() {
+  const out = {};
+  for (const slug of CONT) {
+    const fin = cupEvents(slug).filter((e) => /^final/.test(e.phase || '') && e.status.kind !== 'post' && !e.home.tbd && !e.away.tbd).sort((a, b) => a.date - b.date)[0];
+    const teams = fin ? [fin.home, fin.away].map((t) => ({ id: t.id, name: t.name || allTeams().find((x) => x.id === t.id)?.name || '' })) : [];
+    if (fin && teams.every((t) => t.name)) out[slug] = { name: slug === 'conmebol.libertadores' ? 'Libertadores' : 'Sul-Americana', when: shortDay(fin.date), teams };
+  }
+  return out;
 }
 
 // ---------- tela ----------

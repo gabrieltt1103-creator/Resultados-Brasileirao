@@ -7,7 +7,7 @@ self.onmessage = (e) => {
   const prior = Array.isArray(e.data.prior) ? new Map(e.data.prior) : null;
   let result = null;
   try {
-    if (kind === 'secador') result = secador({ finished: rows, events, targets: e.data.targets, teamIds: e.data.teamIds, zones, runs, prior });
+    if (kind === 'secador') result = secador({ finished: rows, events, targets: e.data.targets, teamIds: e.data.teamIds, zones, runs, prior, vagas: e.data.vagas || null });
     else {
       const out = chances({ finished: rows, events, overrides, zones, runs, prior, vagas: e.data.vagas || null });
       if (out) result = { byId: [...out.byId], runs: out.runs, left: out.left, vagas: out.vagas };

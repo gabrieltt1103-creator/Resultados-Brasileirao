@@ -356,38 +356,74 @@ function jolt(ea, ed, spread, rand) {
   }
 }
 
-/**
- * Até que posição vai a vaga na Libertadores num campeonato sorteado (order: índices dos times, do 1º ao
- * último). Sorteia o que cada copa dá de vaga (vagas.js): o total é o da tabela mais o das copas, e cada
- * clube que já tem vaga por uma copa libera a sua da tabela; rebaixado não joga a Libertadores, então a vaga
- * dele também desce para a tabela.
- */
-export function libertadoresCut(order, rows, { base, cups }, zStart, rand) {
-  const pos = new Map(order.map((i, p) => [rows[i].id, p + 1]));
-  let total = base;
-  const holders = new Set();
-  for (const outcomes of cups) {
+// Sorteia o que cada copa dá de vaga num campeonato (um caso de cada copa, pela chance de cada um).
+function sampleCups(cups, rand) {
+  return cups.map((outcomes) => {
     let u = rand();
-    let pick = outcomes[outcomes.length - 1];
     for (const o of outcomes) {
-      if (u < o.p) { pick = o; break; }
+      if (u < o.p) return o;
       u -= o.p;
     }
+    return outcomes[outcomes.length - 1];
+  });
+}
+
+/**
+ * Vagas continentais num campeonato sorteado (order: índices dos times, do 1º ao último; picks: o que cada
+ * copa deu de vaga). Na Libertadores, o total é o da tabela (base) mais o das copas, e cada clube que já tem
+ * vaga por uma copa libera a sua da tabela; rebaixado não joga a Libertadores, então a vaga dele também desce.
+ * Na Sul-Americana, as sul posições seguintes, pulando quem já vai à Libertadores e quem caiu.
+ * Devolve {cut: última posição com vaga na Libertadores pela tabela, lib, sul: 1 para quem vai, por índice}.
+ */
+function continental(order, rows, base, sul, picks, zStart, buf = scratch(rows)) {
+  const n = order.length;
+  const { pos, at, lib, sul: sa } = buf;
+  lib.fill(0);
+  sa.fill(0);
+  order.forEach((i, p) => { pos[i] = p + 1; });
+  let total = base;
+  const holders = new Set(); // índice do time (ou id, se não é da Série A)
+  for (const pick of picks) {
     for (const id of pick.ids) {
       total++;
-      if (!(zStart && pos.get(id) >= zStart)) holders.add(id);
+      const i = at.get(id);
+      if (i == null) holders.add(id);
+      else if (!(zStart && pos[i] >= zStart)) { holders.add(i); lib[i] = 1; }
     }
   }
   let free = total - holders.size;
-  for (let p = 0; p < order.length; p++) if (!holders.has(rows[order[p]].id) && --free === 0) return p + 1;
-  return order.length;
+  let p = 0;
+  for (; p < n && free > 0; p++) if (!holders.has(order[p])) { lib[order[p]] = 1; free--; }
+  const cut = p;
+  for (let left = sul; p < n && left > 0; p++) {
+    const i = order[p];
+    if (holders.has(i) || (zStart && p + 1 >= zStart)) continue;
+    sa[i] = 1;
+    left--;
+  }
+  return { cut, lib, sul: sa };
+}
+
+// Listas de trabalho de continental(), criadas uma vez por conta (são milhares de campeonatos sorteados).
+function scratch(rows) {
+  const n = rows.length;
+  return { pos: new Int32Array(n), at: new Map(rows.map((r, i) => [r.id, i])), lib: new Uint8Array(n), sul: new Uint8Array(n) };
+}
+
+/**
+ * Até que posição vai a vaga na Libertadores num campeonato sorteado (order: índices dos times, do 1º ao
+ * último), sorteando o que cada copa dá de vaga (vagas.js). Ver continental().
+ */
+export function libertadoresCut(order, rows, { base, sul = 6, cups }, zStart, rand) {
+  return continental(order, rows, base, sul, sampleCups(cups, rand), zStart).cut;
 }
 
 /**
  * Chances de cada time terminar em cada faixa da tabela (cum: chance de terminar até cada posição).
  * finished: Map id -> linha com todos os jogos encerrados (precisa da temporada completa).
  * vagas: o que as copas dão de vaga na Libertadores (vagasInput, em vagas.js); com elas, devolve também a
- * chance de a vaga chegar até cada posição (vagas.dist: posição -> chance de ser a última com vaga).
+ * chance de a vaga chegar até cada posição (vagas.dist: posição -> chance de ser a última com vaga) e, por
+ * time, a de ir à Libertadores (lib) e à Sul-Americana (sul).
  * Devolve null quando não dá para saber quais jogos faltam.
  */
 export function chances({ finished, events, overrides = {}, zones, runs = 4000, seed = 7, prior = null, vagas = null }) {
@@ -400,6 +436,9 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
   const vg = vagas?.cups?.length ? vagas : null;
   const vrand = rng(seed + 1);
   const cuts = new Float64Array(n + 1);
+  const buf = scratch(rows);
+  const libN = new Uint32Array(n);
+  const sulN = new Uint32Array(n);
   const posCount = new Uint32Array(n * n);
   const ptsSum = new Float64Array(n);
   const P = new Float64Array(n);
@@ -423,7 +462,11 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
     order.sort((x, y) => P[y] - P[x] || W[y] - W[x] || D[y] - D[x] || F[y] - F[x] || jitter[y] - jitter[x]);
     for (let p = 0; p < n; p++) posCount[order[p] * n + p]++;
     for (let i = 0; i < n; i++) ptsSum[i] += P[i];
-    if (vg) cuts[libertadoresCut(order, rows, vg, zones?.zStart, vrand)]++;
+    if (vg) {
+      const c = continental(order, rows, vg.base, vg.sul ?? 6, sampleCups(vg.cups, vrand), zones?.zStart, buf);
+      cuts[c.cut]++;
+      for (let i = 0; i < n; i++) { libN[i] += c.lib[i]; sulN[i] += c.sul[i]; }
+    }
   }
 
   const out = new Map();
@@ -435,7 +478,7 @@ export function chances({ finished, events, overrides = {}, zones, runs = 4000, 
     if (zones?.zStart) for (let p = zones.zStart; p <= n; p++) z += at(p);
     const cum = [];
     for (let p = 1, s = 0; p <= n; p++) cum.push((s += at(p)));
-    out.set(r.id, { title: at(1), g, z, pts: ptsSum[i] / runs, cum });
+    out.set(r.id, { title: at(1), g, z, pts: ptsSum[i] / runs, cum, ...(vg ? { lib: libN[i] / runs, sul: sulN[i] / runs } : {}) });
   });
   const dist = {};
   cuts.forEach((c, k) => { if (c) dist[k] = c / runs; });
@@ -453,12 +496,15 @@ const OUTCOMES = [(h, a) => (h > a ? [h, a] : [1, 0]), (h, a) => (h === a ? [h, 
  * aleatórios comuns): a diferença entre eles vem só do jogo trocado, sem o ruído de sorteios diferentes.
  * Jogo já encerrado também entra: troca o placar real pelo resultado testado.
  * teamIds: o time do torcedor e os rivais.
- * Devolve {runs, teams: {id: {base: {title, g, z}, games: [{id, title: [m, e, v], g: [...], z: [...]}]}}} ou null.
+ * vagas (vagasInput, em vagas.js): com elas, também a chance de Libertadores (lib) e de Sul-Americana (sul)
+ * em cada resultado, e o que cada final de copa muda (cups: [{slug, options: [{ids, p, lib, sul}]}], com o
+ * mesmo sorteio para os dois resultados da final).
+ * Devolve {runs, teams: {id: {base: {title, g, z, lib, sul}, games: [{id, title: [m, e, v], g, z, lib, sul}], cups}}} ou null.
  */
-export function secador({ finished, events, targets, teamIds, zones, runs = 4000, seed = 11, prior = null }) {
+export function secador({ finished, events, targets, teamIds, zones, runs = 4000, seed = 11, prior = null, vagas = null }) {
   const prep = prepare({ finished, events, prior });
   if (!prep) return null;
-  const { n, idx, pts, w, gd, gf, live, left, spread } = prep;
+  const { rows, n, idx, pts, w, gd, gf, live, left, spread } = prep;
   const ids = teamIds.filter((id, i) => idx.has(id) && teamIds.indexOf(id) === i);
   if (!ids.length) return null;
   const who = ids.map((id) => idx.get(id));
@@ -514,6 +560,26 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
       if (r >= zFrom) out[i + 2]++;
     }
   };
+  // Vagas continentais (com as copas): precisa da tabela inteira na ordem; as copas têm o seu sorteio.
+  const vg = vagas?.cups?.length ? vagas : null;
+  const vrand = rng(seed + 1);
+  const order = Array.from({ length: n }, (_, i) => i);
+  const sorted = () => order.sort((x, y) => P[y] - P[x] || W[y] - W[x] || D[y] - D[x] || F[y] - F[x] || J[y] - J[x]);
+  // Finais com mais de um caso (a da Libertadores, a da Sul-Americana): cada caso é testado no mesmo sorteio.
+  const open = vg ? vg.cups.map((c, ci) => ci).filter((ci) => vg.cups[ci].length > 1) : [];
+  const vbase = new Uint32Array(T * 2);
+  const vhit = new Uint32Array(T * tg.length * 6);
+  const vcup = open.map((ci) => new Uint32Array(T * vg.cups[ci].length * 2));
+  let picks = null;
+  const buf = scratch(rows);
+  const tallyV = (out, at, chosen = picks) => {
+    const c = continental(order, rows, vg.base, vg.sul ?? 6, chosen, zones?.zStart, buf);
+    for (let k = 0; k < T; k++) {
+      const i = at(k);
+      out[i] += c.lib[who[k]];
+      out[i + 1] += c.sul[who[k]];
+    }
+  };
   for (let s = 0; s < runs; s++) {
     P.set(pts); W.set(w); D.set(gd); F.set(gf);
     jolt(ea, ed, spread, rand);
@@ -530,6 +596,14 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
     });
     for (let i = 0; i < n; i++) J[i] = rand();
     tally(base, (k) => k * 3);
+    if (vg) {
+      picks = sampleCups(vg.cups, vrand);
+      sorted();
+      tallyV(vbase, (k) => k * 2);
+      open.forEach((ci, oi) => vg.cups[ci].forEach((opt, j) => {
+        tallyV(vcup[oi], (k) => (k * vg.cups[ci].length + j) * 2, picks.map((x, cj) => (cj === ci ? opt : x)));
+      }));
+    }
     tg.forEach((t, ti) => {
       const [x, y] = t.done || (t.live != null ? [liveRes[2 * t.live], liveRes[2 * t.live + 1]] : [leftRes[2 * t.left], leftRes[2 * t.left + 1]]);
       add(t.h, t.a, x, y, -1);
@@ -537,6 +611,7 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
         const [hs, as] = pick(x, y);
         add(t.h, t.a, hs, as, 1);
         tally(hit, (k) => (k * tg.length + ti) * 9 + o * 3);
+        if (vg) { sorted(); tallyV(vhit, (k) => (k * tg.length + ti) * 6 + o * 2); }
         add(t.h, t.a, hs, as, -1);
       });
       add(t.h, t.a, x, y, 1);
@@ -546,9 +621,14 @@ export function secador({ finished, events, targets, teamIds, zones, runs = 4000
   ids.forEach((id, k) => {
     const at = (ti, o, j) => hit[(k * tg.length + ti) * 9 + o * 3 + j] / runs;
     const three = (ti, j) => [0, 1, 2].map((o) => at(ti, o, j));
+    const vthree = (ti, j) => [0, 1, 2].map((o) => vhit[(k * tg.length + ti) * 6 + o * 2 + j] / runs);
     teams[id] = {
-      base: { title: base[k * 3] / runs, g: base[k * 3 + 1] / runs, z: base[k * 3 + 2] / runs },
-      games: tg.map((t, ti) => ({ id: t.id, title: three(ti, 0), g: three(ti, 1), z: three(ti, 2) })),
+      base: { title: base[k * 3] / runs, g: base[k * 3 + 1] / runs, z: base[k * 3 + 2] / runs, ...(vg ? { lib: vbase[k * 2] / runs, sul: vbase[k * 2 + 1] / runs } : {}) },
+      games: tg.map((t, ti) => ({ id: t.id, title: three(ti, 0), g: three(ti, 1), z: three(ti, 2), ...(vg ? { lib: vthree(ti, 0), sul: vthree(ti, 1) } : {}) })),
+      cups: open.map((ci, oi) => ({
+        slug: vg.slugs?.[ci] || null,
+        options: vg.cups[ci].map((opt, j) => ({ ids: opt.ids, p: opt.p, lib: vcup[oi][(k * vg.cups[ci].length + j) * 2] / runs, sul: vcup[oi][(k * vg.cups[ci].length + j) * 2 + 1] / runs })),
+      })),
     };
   });
   return { runs, teams };

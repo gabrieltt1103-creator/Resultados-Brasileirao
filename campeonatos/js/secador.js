@@ -71,21 +71,34 @@ export function rivalsOf(team, teams, saved) {
 /**
  * O que ainda está em jogo para o time, do mais importante para o menos. Chance pequena também conta:
  * quem está no meio da tabela com 3% de risco de cair ainda olha para baixo.
- * base: {title, g, z} do time (z = risco de cair). Devolve 'title', 'g', 'z' ou null (nada em jogo).
+ * base: {title, g, z} do time (z = risco de cair) e, com as vagas das copas, lib (vaga na Libertadores, com a
+ * zona que pode ir até o G9) e sul (vaga na Sul-Americana), que tomam o lugar do G.
+ * Devolve 'title', 'lib', 'sul', 'g', 'z' ou null (nada em jogo).
  */
 export function objectiveFor(base, zones) {
   if (!base) return null;
-  const { title, g, z } = base;
-  const hasG = !!zones?.g;
+  const { title, g, z, lib, sul } = base;
+  const vagas = lib != null;
+  const hasG = !!zones?.g && !vagas;
   const hasZ = !!zones?.zStart;
+  const open = (p, lo) => p != null && p >= lo && p <= 1 - lo;
   if (title >= 0.05 && title < 0.995) return 'title';
   if (hasZ && z >= 0.1 && z < 0.995) return 'z';
+  if (vagas && open(lib, 0.03)) return 'lib';
+  if (vagas && open(sul, 0.05)) return 'sul';
   if (hasG && g >= 0.03 && g <= 0.97) return 'g';
   if (hasZ && z >= 0.01 && z < 0.995) return 'z';
+  if (vagas && open(lib, 0.01)) return 'lib';
+  if (vagas && open(sul, 0.01)) return 'sul';
   if (hasG && g >= 0.01 && g <= 0.99) return 'g';
   if (title >= 0.01 && title < 0.995) return 'title';
   return null;
 }
+
+// Nome do que está em jogo, nas frases: "título", "G6", "Libertadores", "Sul-Americana".
+const prize = (objective, zones) => ({ title: 'título', lib: 'Libertadores', sul: 'Sul-Americana' }[objective] || zones?.gLabel || 'G6');
+// "do título", "do G6", "da Libertadores".
+const ofPrize = (objective, zones) => `${objective === 'lib' || objective === 'sul' ? 'da' : 'do'} ${prize(objective, zones)}`;
 
 // ---------- cada jogo ----------
 
@@ -157,7 +170,7 @@ export function stakeOf(res, ev, teamId, zones) {
 
 // Faixa em que a briga do rival está aberta de verdade (chance com empate, como retrato de agora):
 // título a partir de 10%, G entre 15% e 85%, risco de cair entre 8% e 95%.
-const OPEN = { title: [0.1, 0.95], g: [0.15, 0.85], z: [0.08, 0.95] };
+const OPEN = { title: [0.1, 0.95], g: [0.15, 0.85], lib: [0.15, 0.85], sul: [0.15, 0.85], z: [0.08, 0.95] };
 
 /**
  * O jogo dói para o rival? Ele está numa briga aberta e perder muda 4 pontos ou mais. Rival tranquilo,
@@ -285,8 +298,8 @@ export function pick(verdicts, max = 3) {
 
 // ---------- frases ----------
 
-const GOAL = { title: () => 'Chance de título', g: (zones) => `Chance de ${zones?.gLabel || 'G6'}`, z: () => 'Risco de cair' };
-const YOUR = { title: () => 'a sua chance de título', g: (zones) => `a sua chance de ${zones?.gLabel || 'G6'}`, z: () => 'a sua fuga da queda' };
+const GOAL = { title: () => 'Chance de título', g: (zones) => `Chance de ${zones?.gLabel || 'G6'}`, lib: () => 'Chance de Libertadores', sul: () => 'Chance de Sul-Americana', z: () => 'Risco de cair' };
+const YOUR = { title: () => 'a sua chance de título', g: (zones) => `a sua chance de ${zones?.gLabel || 'G6'}`, lib: () => 'a sua chance de Libertadores', sul: () => 'a sua chance de Sul-Americana', z: () => 'a sua fuga da queda' };
 
 // Quem está quase rebaixado (risco de 90% ou mais) pensa na chance de escapar, não no risco de cair.
 const escaping = (objective, values) => objective === 'z' && values.every((p) => p >= 0.9);
@@ -309,20 +322,20 @@ function numbers(ev, v, objective, zones) {
 // O que o rival perde: "Se o Flamengo perder, a chance de título dele cai para 47%."
 function rivalLoss(t, s, zones) {
   if (s.objective === 'z') return `Se ${o(t.name)} perder, o risco de cair ${dele(t.name)} sobe para ${pct(s.lose)}.`;
-  return `Se ${o(t.name)} perder, a chance de ${s.objective === 'title' ? 'título' : zones?.gLabel || 'G6'} ${dele(t.name)} cai para ${pct(s.lose)}.`;
+  return `Se ${o(t.name)} perder, a chance de ${prize(s.objective, zones)} ${dele(t.name)} cai para ${pct(s.lose)}.`;
 }
 
 // O que o rival ganharia: "ajudaria o Coritiba a fugir da queda".
 function rivalGain(t, s, zones) {
   if (s.objective === 'z') return `ajudaria ${o(t.name)} a fugir da queda`;
-  return `deixaria ${o(t.name)} mais perto do ${s.objective === 'title' ? 'título' : zones?.gLabel || 'G6'}`;
+  return `deixaria ${o(t.name)} mais perto ${ofPrize(s.objective, zones)}`;
 }
 
 // "a chance de título dele", "o risco de cair dele": a chance de um time, para as frases do jogo encerrado.
 function chanceOf(objective, zones, owner = '') {
   const of = owner ? ` ${owner}` : '';
   if (objective === 'z') return `o risco de cair${of}`;
-  return `a chance de ${objective === 'title' ? 'título' : zones?.gLabel || 'G6'}${of}`;
+  return `a chance de ${prize(objective, zones)}${of}`;
 }
 
 // ---------- humor da rivalidade ----------
@@ -332,11 +345,13 @@ function chanceOf(objective, zones, owner = '') {
 const JOKE = {
   title: ['Taça na mão do rival, aqui não.', 'Volta olímpica do rival? Melhor não.'],
   g: ['Libertadores, só pela TV.', 'Libertadores, só no videogame.'],
+  lib: ['Libertadores, só pela TV.', 'Libertadores, só no videogame.'],
+  sul: ['Quarta-feira livre no ano que vem.', 'Sul-Americana, só pela TV.'],
   z: ['A Série B tem vaga sobrando.', 'A segunda divisão manda lembranças.'],
 };
 // Depois do jogo, pelo resultado do rival.
 const AFTER = {
-  lost: { title: 'Já pode mandar meme no grupo.', g: 'A Libertadores ficou mais longe.', z: 'A Série B manda lembranças.' },
+  lost: { title: 'Já pode mandar meme no grupo.', g: 'A Libertadores ficou mais longe.', lib: 'A Libertadores ficou mais longe.', sul: 'A Sul-Americana ficou mais longe.', z: 'A Série B manda lembranças.' },
   drew: 'Meia secada.',
   won: 'Hoje não deu. Fica pra próxima.',
 };
@@ -431,6 +446,44 @@ export function verdictText(ev, v, { objective, zones } = {}) {
 }
 
 /**
+ * As finais de copa que mexem com a vaga do time (na Libertadores ou na Sul-Americana), fora da rodada:
+ * para quem torcer, com a chance em cada resultado. res: contas do time vindas de secador() ({cups});
+ * finals: {slug: {name, when, teams: [{id, name}]}} das finais ainda por jogar; rivals: Set de ids.
+ * Devolve [{kind, chip, text}] ('help'; com rival, 'nose' se o ganho é grande, senão 'pride'; 'mine' para a final
+ * do próprio time).
+ */
+export function cupAdvice({ team, rivals = new Set(), objective, res, finals = {} }) {
+  if (objective !== 'lib' && objective !== 'sul') return [];
+  const out = [];
+  for (const c of res?.cups || []) {
+    const f = finals[c.slug];
+    if (!f || c.options.length < 2) continue;
+    const vals = c.options.map((x) => x[objective]);
+    const hi = Math.max(...vals);
+    const lo = Math.min(...vals);
+    const [a, b] = pctPair(hi, lo);
+    if (hi - lo < 0.02 || a === b) continue;
+    // Campeão de cada caso: o clube da Série A que leva a vaga, ou o outro finalista (estrangeiro).
+    const champ = (opt) => f.teams.find((t) => opt.ids.includes(t.id)) || f.teams.find((t) => !c.options.some((x) => x.ids.includes(t.id)));
+    const cheer = champ(c.options[vals.indexOf(hi)]);
+    const other = champ(c.options[vals.indexOf(lo)]);
+    if (!cheer || !other) continue;
+    const label = GOAL[objective]();
+    const when = f.when ? ` (${f.when})` : '';
+    if (cheer.id === team.id) {
+      out.push({ kind: 'mine', chip: 'Sua final', text: `Final da ${f.name}${when}. ${label}: ${a} com o título, ${b} sem.` });
+    } else if (rivals.has(cheer.id)) {
+      // Título do rival é título do rival: torcer por ele só com ganho grande; senão, secar mesmo assim.
+      if (hi - lo >= 0.15) out.push({ kind: 'nose', chip: 'Nariz tapado', text: `Dessa vez, torça ${pelo(cheer.name)}, seu rival, na final da ${f.name}${when}. ${label}: ${a} com o título ${doo(cheer.name)}, ${b} com o ${doo(other.name)}. Ninguém precisa saber.` });
+      else out.push({ kind: 'pride', chip: `Seque ${o(cheer.name)}`, text: `Na final da ${f.name}${when}, o título ${doo(cheer.name)} até ajudaria ${YOUR[objective]()} (${a} contra ${b}), mas é título do rival. Seque mesmo.` });
+    } else {
+      out.push({ kind: 'help', chip: `Torça ${pelo(cheer.name)}`, text: `Na final da ${f.name}${when}. ${label}: ${a} com o título ${doo(cheer.name)}, ${b} com o ${doo(other.name)}.` });
+    }
+  }
+  return out;
+}
+
+/**
  * Cartão do secador: objetivo do time e o resumo da rodada, com o jogo que mais pesa.
  * base: chances do time ({title, g, z}) ou null enquanto calcula; verdicts: [{ev, v}] da rodada, já
  * passados por pick(); rivals: quantos rivais o torcedor tem.
@@ -450,6 +503,14 @@ export function secadorSummary({ team, objective, base, verdicts, zones, ready =
     const g = zones?.gLabel || 'G6';
     head = p >= 0.9 ? `${team.name} perto de garantir o ${g}` : p < 0.15 ? `${team.name} correndo atrás do ${g}` : `${team.name} na briga pelo ${g}`;
     sub = `${pct(p)} de chance de ${g} hoje`;
+  } else if (objective === 'lib' || objective === 'sul') {
+    const p = base[objective];
+    const cup = prize(objective);
+    head = p >= 0.9 ? `${team.name} perto da ${cup}` : p < 0.15 ? `${team.name} correndo atrás da ${cup}` : `${team.name} na briga pela ${cup}`;
+    // Na briga pela Libertadores, a Sul-Americana como consolo: garantida ou com a chance de ir a pelo menos ela.
+    const least = base.lib + base.sul;
+    const also = objective !== 'lib' || base.sul < 0.05 ? '' : least >= 0.995 ? ' · no mínimo, Sul-Americana' : ` · ${pct(least)} de ir pelo menos à Sul-Americana`;
+    sub = `${pct(p)} de chance de ${cup} hoje${also}`;
   } else if (objective === 'z') {
     const p = base.z;
     head = p >= 0.9 ? `${team.name} precisa de um milagre` : p < 0.1 ? `${team.name} ainda de olho na queda` : `${team.name} contra o rebaixamento`;
